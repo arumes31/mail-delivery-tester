@@ -82,6 +82,11 @@
                     <h6 class="fw-bold mb-1">From</h6>
                     <p id="resFrom" class="mb-3"></p>
 
+                    <h6 class="fw-bold mb-1"><i class="fa-solid fa-shield-halved me-1"></i> Spam Analysis</h6>
+                    <div id="spamAnalysis" class="mb-3 d-flex flex-wrap gap-2">
+                        <!-- Spam findings here -->
+                    </div>
+
                     <h6 class="fw-bold mb-1">Body (Text Only)</h6>
                     <pre id="resBody" class="bg-light p-2 rounded border small" style="max-height: 200px; overflow-y: auto;"></pre>
 
@@ -199,6 +204,17 @@
         document.getElementById('resBody').innerText = data.body;
         document.getElementById('resHeaders').innerText = data.headers;
         
+        // Render Spam Analysis
+        const spamDiv = document.getElementById('spamAnalysis');
+        spamDiv.innerHTML = '';
+        if (data.spam_report && data.spam_report.length > 0) {
+            data.spam_report.forEach(f => {
+                spamDiv.innerHTML += `<span class="badge bg-${f.status} border" title="${f.label}">${f.label}: <strong>${f.value}</strong></span>`;
+            });
+        } else {
+            spamDiv.innerHTML = '<span class="text-muted small italic">No specific spam headers found (X-Forefront, SpamAssassin, etc.)</span>';
+        }
+
         const setBadge = (id, val) => {
             const el = document.getElementById(id);
             el.innerText = val.toUpperCase();

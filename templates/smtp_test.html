@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h2><i class="fa-solid fa-envelope-circle-check me-2"></i>SMTP Diagnostics</h2>
+            <p class="text-muted mb-0">Detailed SMTP protocol analysis, transcript, and relay testing.</p>
+        </div>
+        <a href="/" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <form id="smtpTestForm" class="row g-3 align-items-end">
+                    <div class="col-md-6">
+                        <label for="hostInput" class="form-label fw-bold">SMTP Hostname / IP</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-server"></i></span>
+                            <input type="text" class="form-control" id="hostInput" value="{{ host }}" placeholder="smtp.example.com" required>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="portInput" class="form-label fw-bold">Port</label>
+                        <select class="form-select" id="portInput">
+                            <option value="25">25 (SMTP)</option>
+                            <option value="465">465 (SMTPS)</option>
+                            <option value="587">587 (Submission)</option>
+                            <option value="2525">2525 (Alt)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" id="runDiagBtn" class="btn btn-primary w-100">
+                            <i class="fa-solid fa-magnifying-glass me-2"></i> Run Diagnostic
+                        </button>
+                        <div id="quotaDisplay" class="text-center mt-1 x-small text-muted" style="font-size: 0.75rem;">
+                            Limit: 5 tests / min
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card shadow-sm border-0 mb-4" id="reportCard" style="display: none;">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 150px;">Status</th>
+                                <th>Test Name</th>
+                                <th>Information</th>
+                            </tr>
+                        </thead>
+                        <tbody id="report-body">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="transcriptCard" class="card shadow-sm border-0 bg-dark text-white mb-4" style="display: none;">
+            <div class="card-header bg-dark border-secondary text-info fw-bold d-flex justify-content-between">
+                <span><i class="fa-solid fa-terminal me-2"></i>Session Transcript</span>
+                <span id="overall-time" class="small text-muted"></span>
+            </div>
+            <div class="card-body">
+                <pre id="transcript" class="mb-0 font-monospace small" style="color: #00ff00; line-height: 1.6;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('smtpTestForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const host = document.getElementById('hostInput').value;
+        const port = document.getElementById('portInput').value;
+        runSmtpTest(host, port);
+    });
+
+    let countdownInterval = null;
+
+    function runSmtpTest(host, port) {
+        const btn = document.getElementById('runDiagBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Analyzing...';
+        
+        const quotaDisplay = document.getElementById('quotaDisplay');
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        document.getElementById('reportCard').style.display = 'block';
+        document.getElementById('transcriptCard').style.display = 'block';
+        const tbody = document.getElementById('report-body');
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Communicating with ' + host + ':' + port + '...</td></tr>';
+        document.getElementById('transcript').innerHTML = 'Connecting...';
+        document.getElementById('overall-time').innerText = '';
+
+        fetch(`/api/diagnostics/smtp-test?host=${encodeURIComponent(host)}&port=${port}`)
+            .then(res => {
+                if (res.status === 429) {
+                    return res.json().then(d => { 
+                        startCountdown(d.retry_after || 60);
+                        throw new Error(d.message); 
+                    });
+                }
+                return res.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate-right me-2"></i> Run Again';
+                
+                renderReport(data.report);
+                renderTranscript(data.transcript);
+                document.getElementById('overall-time').innerText = `Total Time: ${data.overall_time}ms`;
+                quotaDisplay.innerText = `Remaining: ${data.remaining_quota} / 5 per min`;
+                quotaDisplay.classList.remove('text-danger');
+            })
+            .catch(err => {
+                // If it wasn't a rate limit countdown start, we still need to enable the button
+                if (!countdownInterval) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-2"></i> Run Diagnostic';
+                }
+                showToast(err.message, 'Rate Limit', 'warning');
+            });
+    }
+
+    function startCountdown(seconds) {
+        const quotaDisplay = document.getElementById('quotaDisplay');
+        const btn = document.getElementById('runDiagBtn');
+        quotaDisplay.classList.add('text-danger');
+        
+        let remaining = seconds;
+        const updateText = () => {
+            quotaDisplay.innerText = `Rate limit exceeded. Please wait ${remaining}s...`;
+            btn.innerHTML = `<i class="fa-solid fa-clock me-2"></i> Wait ${remaining}s`;
+        };
+
+        updateText();
+        countdownInterval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+                quotaDisplay.innerText = 'Limit: 5 tests / min';
+                quotaDisplay.classList.remove('text-danger');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-2"></i> Run Diagnostic';
+            } else {
+                updateText();
+            }
+        }, 1000);
+    }
+
+    function renderReport(report) {
+        const tbody = document.getElementById('report-body');
+        tbody.innerHTML = '';
+        if (!report || report.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center py-3 text-danger">No diagnostic data returned.</td></tr>';
+            return;
+        }
+        report.forEach(r => {
+            let badgeClass = 'bg-secondary';
+            if (r.status === 'OK') badgeClass = 'bg-success';
+            else if (r.status === 'Warning') badgeClass = 'bg-warning text-dark';
+            else if (r.status === 'Danger') badgeClass = 'bg-danger';
+
+            tbody.innerHTML += `
+                <tr>
+                    <td><span class="badge ${badgeClass} w-100 py-2">Status ${r.status}</span></td>
+                    <td class="fw-bold">${r.name}</td>
+                    <td>${r.info}</td>
+                </tr>
+            `;
+        });
+    }
+
+    function renderTranscript(lines) {
+        const pre = document.getElementById('transcript');
+        if (!lines || lines.length === 0) {
+            pre.innerHTML = 'No transcript captured.';
+            return;
+        }
+        pre.innerHTML = lines.map(line => {
+            if (line.match(/^[0-9]{3}/)) {
+                return `<span style="color: #55ff55;">${line}</span>`;
+            } else if (line.startsWith('Error:')) {
+                return `<span style="color: #ff5555;">${line}</span>`;
+            }
+            return line;
+        }).join('\n');
+    }
+</script>
+{% endblock %}

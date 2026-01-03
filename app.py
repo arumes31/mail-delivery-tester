@@ -8,6 +8,11 @@ import logging
 import requests
 import datetime
 import pyotp
+import json
+import dns.resolver
+import socket
+import time
+from spam_decoder import decode_spam_headers
 from functools import wraps
 from email.mime.text import MIMEText
 from email.header import decode_header
@@ -112,6 +117,8 @@ class MailTest(Base):
     spf_status = Column(String(50))
     dkim_status = Column(String(50))
     dmarc_status = Column(String(50))
+    spam_report = Column(String) # JSON string
+
 
 Base.metadata.create_all(engine)
 
@@ -356,8 +363,9 @@ def send_probe_email():
     finally:
         session.close()
 
-# --- Global state for fast polling ---
+# --- Global state for fast polling & rate limiting ---
 ACTIVE_TESTS = {} # {test_id: timestamp}
+IP_RATE_LIMITS = {} # {ip: [timestamps]}
 LAST_IMAP_CHECK = datetime.datetime.min
 
 def check_inbox():
@@ -472,6 +480,10 @@ def check_inbox():
                                 if "dmarc=pass" in auth_results.lower(): dmarc = "pass"
                                 elif "dmarc=fail" in auth_results.lower(): dmarc = "fail"
 
+                                # Decode Spam Headers
+                                headers_dict = {k: v for k, v in msg.items()}
+                                spam_report = json.dumps(decode_spam_headers(headers_dict))
+
                                 # Save test result
                                 new_test = MailTest(
                                     test_id=test_id,
@@ -481,7 +493,8 @@ def check_inbox():
                                     headers=headers_str,
                                     spf_status=spf,
                                     dkim_status=dkim,
-                                    dmarc_status=dmarc
+                                    dmarc_status=dmarc,
+                                    spam_report=spam_report
                                 )
                                 session.add(new_test)
                                 session.commit()
@@ -714,6 +727,283 @@ def recipients_page():
 def mail_tester_page():
     return render_template('mail_tester.html', imap_user=CONFIG['IMAP_USER'])
 
+@app.route('/system-diagnostics')
+@login_required
+def system_diagnostics_page():
+    return render_template('system_diagnostics.html')
+
+@app.route('/api/diagnostics/run')
+@login_required
+def api_diagnostics_run():
+    results = {
+        'smtp': {'status': 'pending', 'details': []},
+        'imap': {'status': 'pending', 'details': []},
+        'dns': {'status': 'pending', 'details': []},
+    }
+
+    # 1. SMTP Check
+    try:
+        if CONFIG['SMTP_HOST']:
+            results['smtp']['details'].append(f"Connecting to {CONFIG['SMTP_HOST']}:{CONFIG['SMTP_PORT']}...")
+            if CONFIG['SMTP_PORT'] == 465:
+                s = smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=10)
+            else:
+                s = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=10)
+                s.starttls()
+            
+            with s:
+                code, resp = s.ehlo()
+                results['smtp']['details'].append(f"EHLO Response: {code}")
+                
+                # Check Auth
+                try:
+                    s.login(CONFIG['SMTP_USER'], CONFIG['SMTP_PASS'])
+                    results['smtp']['details'].append("Authentication: Success")
+                    results['smtp']['status'] = 'success'
+                except Exception as e:
+                    results['smtp']['details'].append(f"Authentication Failed: {str(e)}")
+                    results['smtp']['status'] = 'warning'
+        else:
+            results['smtp']['status'] = 'skipped'
+            results['smtp']['details'].append("SMTP Host not configured")
+    except Exception as e:
+        results['smtp']['status'] = 'danger'
+        results['smtp']['details'].append(f"Connection Error: {str(e)}")
+
+    # 2. IMAP Check
+    try:
+        if CONFIG['IMAP_HOST']:
+            results['imap']['details'].append(f"Connecting to {CONFIG['IMAP_HOST']}:{CONFIG['IMAP_PORT']}...")
+            m = imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'])
+            with m:
+                results['imap']['details'].append(f"Capabilities: {m.capabilities}")
+                try:
+                    m.login(CONFIG['IMAP_USER'], CONFIG['IMAP_PASS'])
+                    results['imap']['details'].append("Authentication: Success")
+                    results['imap']['status'] = 'success'
+                except Exception as e:
+                    results['imap']['details'].append(f"Authentication Failed: {str(e)}")
+                    results['imap']['status'] = 'warning'
+        else:
+            results['imap']['status'] = 'skipped'
+            results['imap']['details'].append("IMAP Host not configured")
+    except Exception as e:
+        results['imap']['status'] = 'danger'
+        results['imap']['details'].append(f"Connection Error: {str(e)}")
+
+    # 3. DNS Check (for the SMTP/IMAP domain)
+    try:
+        # Determine domain from SMTP_USER
+        domain = ""
+        if CONFIG['SMTP_USER'] and '@' in CONFIG['SMTP_USER']:
+            domain = CONFIG['SMTP_USER'].split('@')[1]
+        
+        if domain:
+            results['dns']['details'].append(f"Analyzing domain: {domain}")
+            
+            # MX Records
+            try:
+                mxs = dns.resolver.resolve(domain, 'MX')
+                for mx in mxs:
+                    results['dns']['details'].append(f"MX Record: {mx.exchange} (Priority: {mx.preference})")
+            except: results['dns']['details'].append("MX Records: Not found")
+
+            # SPF
+            try:
+                txts = dns.resolver.resolve(domain, 'TXT')
+                spf_found = False
+                for txt in txts:
+                    if 'v=spf1' in str(txt):
+                        results['dns']['details'].append(f"SPF Record: {str(txt)}")
+                        spf_found = True
+                if not spf_found: results['dns']['details'].append("SPF Record: Missing")
+            except: results['dns']['details'].append("SPF Record: Lookup failed")
+
+            # DMARC
+            try:
+                dmarc = dns.resolver.resolve(f'_dmarc.{domain}', 'TXT')
+                for d in dmarc:
+                    results['dns']['details'].append(f"DMARC Record: {str(d)}")
+            except: results['dns']['details'].append("DMARC Record: Missing or failed")
+            
+            # PTR (Reverse DNS) of SMTP Host
+            try:
+                ip = socket.gethostbyname(CONFIG['SMTP_HOST'])
+                results['dns']['details'].append(f"SMTP Host IP: {ip}")
+                try:
+                    ptr = socket.gethostbyaddr(ip)
+                    results['dns']['details'].append(f"Reverse DNS (PTR): {ptr[0]}")
+                except: results['dns']['details'].append("Reverse DNS (PTR): Not found")
+            except: pass
+
+            results['dns']['status'] = 'success'
+        else:
+            results['dns']['status'] = 'skipped'
+            results['dns']['details'].append("Could not determine domain from SMTP_USER")
+    except Exception as e:
+        results['dns']['status'] = 'danger'
+        results['dns']['details'].append(f"DNS Analysis Error: {str(e)}")
+
+    return jsonify(results)
+
+@app.route('/smtp-test')
+def smtp_test_page():
+    return render_template('smtp_test.html', host=CONFIG['SMTP_HOST'])
+
+@app.route('/api/diagnostics/smtp-test')
+def api_smtp_test():
+    # Rate Limiting: 5 per minute per IP
+    now = time.time()
+    ip = request.remote_addr
+    
+    # Handle reverse proxy IP if enabled
+    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
+        ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+
+    if ip not in IP_RATE_LIMITS:
+        IP_RATE_LIMITS[ip] = []
+    
+    # Filter history for last 60 seconds
+    IP_RATE_LIMITS[ip] = [t for t in IP_RATE_LIMITS[ip] if now - t < 60]
+    
+    if len(IP_RATE_LIMITS[ip]) >= 5:
+        retry_after = int(60 - (now - IP_RATE_LIMITS[ip][0]))
+        return jsonify({
+            'error': 'Rate limit exceeded', 
+            'message': f'Please wait {retry_after} seconds before running another test.',
+            'retry_after': retry_after
+        }), 429
+    
+    IP_RATE_LIMITS[ip].append(now)
+    remaining = 5 - len(IP_RATE_LIMITS[ip])
+    
+    host = request.args.get('host', CONFIG['SMTP_HOST'])
+    port = request.args.get('port', type=int)
+    
+    if not host:
+        return jsonify({'error': 'No host configured or provided'}), 400
+
+    report = []
+    transcript = []
+    
+    def add_row(status, name, info):
+        report.append({'status': status, 'name': name, 'info': info})
+    
+    def log(msg, elapsed=None):
+        entry = msg
+        if elapsed is not None:
+            entry += f" [{int(elapsed * 1000)} ms]"
+        transcript.append(entry)
+
+    start_time = time.time()
+    try:
+        # 1. DNS Lookups
+        ip = socket.gethostbyname(host)
+        ptr = "Unknown"
+        
+        # Robust PTR lookup using dnspython
+        try:
+            rev_name = dns.reversename.from_address(ip)
+            try:
+                # Attempt 1: Default Resolver
+                ptr_results = dns.resolver.resolve(rev_name, "PTR")
+            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.Timeout):
+                # Attempt 2: Fallback to Google DNS (more reliable in some container/restricted environments)
+                resolver = dns.resolver.Resolver()
+                resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+                ptr_results = resolver.resolve(rev_name, "PTR")
+
+            if ptr_results:
+                ptr = str(ptr_results[0]).rstrip('.')
+                add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {ip} resolves to {ptr}")
+                add_row("OK", "SMTP Valid Hostname", "OK - Reverse DNS is a valid Hostname")
+            else:
+                raise Exception("No PTR records found")
+        except Exception as e:
+            # Fallback to socket if dnspython fails completely
+            try:
+                ptr_res = socket.gethostbyaddr(ip)
+                ptr = ptr_res[0]
+                add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {ip} resolves to {ptr}")
+                add_row("OK", "SMTP Valid Hostname", "OK - Reverse DNS is a valid Hostname")
+            except:
+                add_row("Warning", "SMTP Reverse DNS Mismatch", f"Warning - Could not resolve PTR for {ip} ({str(e)})")
+                add_row("Warning", "SMTP Valid Hostname", "Reverse DNS lookup failed")
+
+        # 2. Connection & Banner
+        conn_start = time.time()
+        # Use provided port, or logic-based default
+        test_port = port if port else (CONFIG['SMTP_PORT'] if host == CONFIG['SMTP_HOST'] else 25)
+        
+        # Handle SSL vs plain
+        if test_port == 465:
+            sock = ssl.wrap_socket(socket.create_connection((host, test_port), timeout=10))
+        else:
+            sock = socket.create_connection((host, test_port), timeout=10)
+            
+        conn_time = time.time() - conn_start
+        
+        log(f"Connecting to {ip} on port {test_port}")        
+        # Read Banner
+        banner_raw = sock.recv(1024).decode(errors='ignore').strip()
+        log(banner_raw, conn_time)
+        
+        banner_text = banner_raw.split(' ', 1)[1] if ' ' in banner_raw else banner_raw
+        banner_match = ptr.lower() in banner_raw.lower()
+        if banner_match:
+            add_row("OK", "SMTP Banner Check", "OK - Reverse DNS matches SMTP Banner")
+        else:
+            add_row("Warning", "SMTP Banner Check", f"Banner does not match PTR ({ptr})")
+            
+        add_row("OK", "SMTP Connection Time", f"{conn_time:.3f} seconds - Good on Connection time")
+
+        # 3. EHLO
+        ehlo_start = time.time()
+        sock.send(f"EHLO {socket.gethostname()}\r\n".encode())
+        ehlo_resp = sock.recv(1024).decode(errors='ignore').strip()
+        ehlo_time = time.time() - ehlo_start
+        log(f"EHLO {socket.gethostname()}")
+        log(ehlo_resp, ehlo_time)
+
+        # 4. TLS Check
+        has_tls = "STARTTLS" in ehlo_resp or CONFIG['SMTP_PORT'] == 465
+        add_row("OK" if has_tls else "Warning", "SMTP TLS", "OK - Supports TLS." if has_tls else "TLS not detected in EHLO")
+
+        # 5. Open Relay Test (Attempting to mail to external without auth)
+        relay_start = time.time()
+        sock.send(b"MAIL FROM:<test@maildt.internal>\r\n")
+        mfrom_resp = sock.recv(1024).decode(errors='ignore').strip()
+        log("MAIL FROM:<test@maildt.internal>")
+        log(mfrom_resp, time.time() - relay_start)
+        
+        rcpt_start = time.time()
+        sock.send(f"RCPT TO:<{CONFIG['IMAP_USER']}>\r\n".encode())
+        rcpt_resp = sock.recv(1024).decode(errors='ignore').strip()
+        log(f"RCPT TO:<{CONFIG['IMAP_USER']}>")
+        rcpt_time = time.time() - rcpt_start
+        log(rcpt_resp, rcpt_time)
+        
+        # If it's a 5xx error, it's NOT an open relay (which is good)
+        is_open = rcpt_resp.startswith('250')
+        add_row("OK" if not is_open else "Danger", "SMTP Open Relay", "OK - Not an open relay." if not is_open else "DANGER - Server accepted relay without auth")
+        
+        trans_time = time.time() - ehlo_start
+        add_row("OK", "SMTP Transaction Time", f"{trans_time:.3f} seconds - Good on Transaction Time")
+        
+        sock.send(b"QUIT\r\n")
+        sock.close()
+        
+    except Exception as e:
+        log(f"Error: {str(e)}")
+        add_row("Danger", "Connection", f"Failed: {str(e)}")
+
+    return jsonify({
+        'report': report,
+        'transcript': transcript,
+        'overall_time': int((time.time() - start_time) * 1000),
+        'remaining_quota': remaining
+    })
+
 @app.route('/api/mail-tester/check/<test_id>')
 def api_mail_tester_check(test_id):
     session = Session()
@@ -730,7 +1020,8 @@ def api_mail_tester_check(test_id):
                 'dkim': test.dkim_status,
                 'dmarc': test.dmarc_status,
                 'headers': test.headers,
-                'body': test.body
+                'body': test.body,
+                'spam_report': json.loads(test.spam_report) if test.spam_report else []
             }
             
             # If found, we can remove from active tracking
@@ -843,20 +1134,38 @@ def update_recipient(r_id):
     finally:
         session.close()
 
+def mask_email(email):
+    """Masks an email address for privacy (e.g. d***l@e***.com)."""
+    if not email or '@' not in email:
+        return email
+    try:
+        user, domain = email.split('@')
+        m_user = user[0] + '***' + user[-1] if len(user) > 2 else user[0] + '***'
+        
+        domain_parts = domain.split('.')
+        m_domain = domain_parts[0][0] + '***'
+        if len(domain_parts) > 1:
+            m_domain += '.' + domain_parts[-1]
+            
+        return f"{m_user}@{m_domain}"
+    except:
+        return email
+
 @app.route('/api/stats')
 def api_stats():
     """Returns the latest probe for each recipient."""
-    session = Session()
+    session_db = Session()
+    is_logged_in = 'logged_in' in session
     try:
         # Subquery to find the latest probe ID for each recipient
         from sqlalchemy import func
-        subq = session.query(
+        subq = session_db.query(
             EmailProbe.recipient_email,
             func.max(EmailProbe.sent_at).label('max_sent_at')
         ).group_by(EmailProbe.recipient_email).subquery()
         
         # Join to get full details
-        latest_probes = session.query(EmailProbe).join(
+        latest_probes = session_db.query(EmailProbe).join(
             subq,
             (EmailProbe.recipient_email == subq.c.recipient_email) & 
             (EmailProbe.sent_at == subq.c.max_sent_at)
@@ -864,13 +1173,14 @@ def api_stats():
         
         data = []
         for p in latest_probes:
+            email_display = p.recipient_email if is_logged_in else mask_email(p.recipient_email)
             data.append({
                 'guid': p.guid,
                 'sent_at': p.sent_at.isoformat() if p.sent_at else None,
                 'received_at': p.received_at.isoformat() if p.received_at else None,
                 'latency': round(p.latency, 2),
                 'status': p.status,
-                'recipient': p.recipient_email,
+                'recipient': email_display,
                 'alert_threshold': p.alert_threshold,
                 'spf': p.spf_status,
                 'dkim': p.dkim_status,
@@ -879,17 +1189,18 @@ def api_stats():
         
         return jsonify(data)
     finally:
-        session.close()
+        session_db.close()
 
 @app.route('/api/history')
 def api_history():
     """Returns history, optionally filtered by recipient."""
-    session = Session()
+    session_db = Session()
+    is_logged_in = 'logged_in' in session
     try:
         limit = request.args.get('limit', 100, type=int)
         recipient = request.args.get('recipient')
         
-        query = session.query(EmailProbe)
+        query = session_db.query(EmailProbe)
         if recipient:
             query = query.filter_by(recipient_email=recipient)
             
@@ -897,13 +1208,14 @@ def api_history():
         
         data = []
         for p in recent:
+            email_display = p.recipient_email if is_logged_in else mask_email(p.recipient_email)
             data.append({
                 'guid': p.guid,
                 'sent_at': p.sent_at.isoformat() if p.sent_at else None,
                 'received_at': p.received_at.isoformat() if p.received_at else None,
                 'latency': round(p.latency, 2),
                 'status': p.status,
-                'recipient': p.recipient_email,
+                'recipient': email_display,
                 'alert_threshold': p.alert_threshold,
                 'spf': p.spf_status,
                 'dkim': p.dkim_status,
@@ -912,21 +1224,21 @@ def api_history():
         
         return jsonify(data)
     finally:
-        session.close()
+        session_db.close()
 
 def cleanup_old_probes():
     """Deletes probes older than 7 days."""
-    session = Session()
+    session_db = Session()
     try:
         cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=7)
-        deleted = session.query(EmailProbe).filter(EmailProbe.sent_at < cutoff).delete()
-        session.commit()
+        deleted = session_db.query(EmailProbe).filter(EmailProbe.sent_at < cutoff).delete()
+        session_db.commit()
         if deleted > 0:
             logger.info(f"Cleanup: Deleted {deleted} old probes.")
     except Exception as e:
         logger.error(f"Error in cleanup: {e}")
     finally:
-        session.close()
+        session_db.close()
 
 # --- Scheduler Setup ---
 scheduler = BackgroundScheduler()

@@ -21,7 +21,7 @@
                         <th>Recipient</th>
                         <th>Status</th>
                         <th>Sent At (UTC)</th>
-                        <th>Latency</th>
+                        <th>RTT <small class="text-muted">(Latency/Max)</small></th>
                         <th>SPF</th>
                         <th>DKIM</th>
                         <th>DMARC</th>
@@ -38,7 +38,7 @@
 
 <!-- History Modal -->
 <div class="modal fade" id="historyModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fa-solid fa-clock-rotate-left me-2"></i>History: <span id="historyRecipientTitle" class="fw-bold text-primary"></span></h5>
@@ -52,6 +52,7 @@
                                 <th>Status</th>
                                 <th>Sent At</th>
                                 <th>Latency</th>
+                                <th>Threshold</th>
                                 <th>SPF</th>
                                 <th>DKIM</th>
                                 <th>DMARC</th>
@@ -115,7 +116,7 @@
                         <tr class="${rowClass}">
                             <td class="fw-bold">
                                 ${item.recipient || '-'}
-                                <div class="small text-muted font-monospace" style="font-size: 0.75em;">${item.guid}</div>
+                                <div class="small text-muted font-monospace" style="font-size: 0.75em; opacity: 0.7;">${item.guid}</div>
                             </td>
                             <td>${getStatusBadge(item.status)}</td>
                             <td>${item.sent_at ? new Date(item.sent_at).toLocaleString() : '-'}</td>
@@ -139,7 +140,7 @@
     function showHistory(recipient) {
         document.getElementById('historyRecipientTitle').innerText = recipient;
         const tbody = document.getElementById('modal-history-body');
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-3"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
         
         const modal = new bootstrap.Modal(document.getElementById('historyModal'));
         modal.show();
@@ -149,7 +150,7 @@
             .then(data => {
                 tbody.innerHTML = '';
                 if (data.length === 0) {
-                     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3">No history found.</td></tr>';
+                     tbody.innerHTML = '<tr><td colspan="8" class="text-center py-3">No history found.</td></tr>';
                      return;
                 }
                 data.forEach(item => {
@@ -158,6 +159,7 @@
                             <td>${getStatusBadge(item.status)}</td>
                             <td>${new Date(item.sent_at).toLocaleString()}</td>
                             <td>${item.latency}s</td>
+                            <td>${item.alert_threshold || '-'}s</td>
                             <td>${getAuthBadge(item.spf)}</td>
                             <td>${getAuthBadge(item.dkim)}</td>
                             <td>${getAuthBadge(item.dmarc)}</td>

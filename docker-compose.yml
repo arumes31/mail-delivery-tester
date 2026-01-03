@@ -50,7 +50,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - ADMIN_TOTP_SECRET=${ADMIN_TOTP_SECRET}
       # Proxy Configuration
-      - ENABLE_PROXY=${ENABLE_PROXY:-false}
+      - ENABLE_PROXY=${ENABLE_PROXY:-true}
     networks:
       - maildt_net
     restart: unless-stopped
