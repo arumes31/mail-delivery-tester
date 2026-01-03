@@ -950,6 +950,7 @@ def api_blacklist_check():
         "bl.spamcop.net",
         "dnsbl.sorbs.net",
         "b.barracudacentral.org",
+        "all.spamrats.com",
         "psbl.surriel.com",
         "dnsbl-1.uceprotect.net",
         "dnsbl-2.uceprotect.net",

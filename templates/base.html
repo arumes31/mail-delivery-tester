@@ -76,9 +76,54 @@
         ::-webkit-scrollbar-thumb:hover { background: var(--bs-primary); }
 
         .toast { background-color: var(--bg-card); border: 1px solid var(--bs-primary); }
+
+        /* Multi-layered SVG Background */
+        .background-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background-color: var(--bg-deep);
+            overflow: hidden;
+        }
+
+        .background-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            transition: opacity 4s ease-in-out;
+            opacity: 0;
+        }
+
+        .background-layer.active {
+            opacity: 0.15;
+        }
+
+        /* Subtle overlay to improve readability */
+        .bg-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: radial-gradient(circle at center, transparent 0%, var(--bg-deep) 100%);
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
+    <div id="background-container" class="background-container">
+        <div id="background-1" class="background-layer"></div>
+        <div id="background-2" class="background-layer"></div>
+        <div class="bg-overlay"></div>
+    </div>
     <nav class="navbar navbar-expand-lg navbar-dark shadow-lg sticky-top">
         <div class="container">
             <a class="navbar-brand" href="/">
@@ -141,6 +186,74 @@
                 showToast('Copied to clipboard!', 'Success');
             });
         }
+
+        // --- SVG Background Generator ---
+        (function() {
+            let activeLayer = 1;
+            const colors = ['#4b0082', '#6f42c1', '#1a1429', '#0f0a1a', '#2a1b3d'];
+
+            function generateMeshSVG() {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                const cellSize = 150;
+                const columns = Math.ceil(width / cellSize) + 1;
+                const rows = Math.ceil(height / cellSize) + 1;
+
+                const points = [];
+                for (let y = 0; rows >= y; y++) {
+                    for (let x = 0; columns >= x; x++) {
+                        points.push({
+                            x: x * cellSize + (Math.random() - 0.5) * cellSize * 0.8,
+                            y: y * cellSize + (Math.random() - 0.5) * cellSize * 0.8
+                        });
+                    }
+                }
+
+                let polygons = '';
+                for (let y = 0; rows > y; y++) {
+                    for (let x = 0; columns > x; x++) {
+                        const p1 = points[y * (columns + 1) + x];
+                        const p2 = points[y * (columns + 1) + x + 1];
+                        const p3 = points[(y + 1) * (columns + 1) + x];
+                        const p4 = points[(y + 1) * (columns + 1) + x + 1];
+
+                        const color1 = colors[Math.floor(Math.random() * colors.length)];
+                        const color2 = colors[Math.floor(Math.random() * colors.length)];
+
+                        polygons += `<polygon points="${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y}" fill="${color1}" fill-opacity="0.4"/>`;
+                        polygons += `<polygon points="${p2.x},${p2.y} ${p4.x},${p4.y} ${p3.x},${p3.y}" fill="${color2}" fill-opacity="0.4"/>`;
+                    }
+                }
+
+                const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${polygons}</svg>`;
+                return `url('data:image/svg+xml;base64,${btoa(svg)}')`;
+            }
+
+            function swapBackgrounds() {
+                const nextLayer = activeLayer === 1 ? 2 : 1;
+                const layerEl = document.getElementById(`background-${nextLayer}`);
+                
+                layerEl.style.backgroundImage = generateMeshSVG();
+                layerEl.classList.add('active');
+                document.getElementById(`background-${activeLayer}`).classList.remove('active');
+                
+                activeLayer = nextLayer;
+            }
+
+            // Initial Draw
+            const bg1 = document.getElementById('background-1');
+            bg1.style.backgroundImage = generateMeshSVG();
+            bg1.classList.add('active');
+
+            // Cycle every 10 seconds
+            setInterval(swapBackgrounds, 10000);
+
+            // Handle Resize
+            window.addEventListener('resize', () => {
+                const curr = document.getElementById(`background-${activeLayer}`);
+                curr.style.backgroundImage = generateMeshSVG();
+            });
+        })();
     </script>
     {% block scripts %}{% endblock %}
 </body>
