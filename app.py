@@ -398,6 +398,7 @@ def send_probe_email():
                 except Exception as send_err:
                     err_msg = f"❌ **Mail Send Failure**\nFailed to send probe to `{recipient.email}`.\nError: `{str(send_err)}`"
                     logger.error(f"[DEBUG] SMTP Error for {recipient.email}: {str(send_err)}")
+                    increment_counter('send_failure', session_provided=session)
                     
                     # Record failure in DB
                     probe = EmailProbe(
@@ -512,9 +513,16 @@ def check_inbox():
                                         probe.dkim_status = "pass" if "dkim=pass" in auth_results.lower() else ("fail" if "dkim=fail" in auth_results.lower() else "unknown")
                                         probe.dmarc_status = "pass" if "dmarc=pass" in auth_results.lower() else ("fail" if "dmarc=fail" in auth_results.lower() else "unknown")
 
+                                        if probe.spf_status == 'fail':
+                                            increment_counter('spf_fail', session_provided=session)
+                                        if probe.dkim_status == 'fail':
+                                            increment_counter('dkim_fail', session_provided=session)
+                                        if probe.dmarc_status == 'fail':
+                                            increment_counter('dmarc_fail', session_provided=session)
+
                                         probe.status = 'RECEIVED'
+                                        increment_counter('mail_received', session_provided=session)
                                         session.commit()
-                                        increment_counter('mail_received')
                                         logger.info(f"Received probe {guid}.")
                                 mail.store(e_id, '+FLAGS', r'\Deleted')
                         except Exception as parse_err:
@@ -701,6 +709,7 @@ def check_delays():
                         if recipient.email_alerts_enabled:
                             send_email_alert(msg)
                         
+                        increment_counter('alert_sent', session_provided=session)
                         recipient.alert_active = True
                     else:
                         logger.info(f"[DEBUG] Alerting: Probe {probe.guid} missing, but {recipient.email} already in alert state. Skipping duplicate notification.")
@@ -1399,14 +1408,26 @@ def api_stats_overview():
 
         def get_timeframe_stats(since=None):
             if since:
-                # Use MetricEvent for time-windowed stats (independent of probes)
+                # Use MetricEvent for time-windowed stats
                 counts = {}
-                types = ['sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist']
+                types = ['sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist', 'send_failure', 'alert_sent', 'spf_fail', 'dkim_fail', 'dmarc_fail']
                 for t in types:
-                    counts[t.replace('-', '_')] = session_db.query(MetricEvent).filter(
+                    key = t.replace('-', '_')
+                    counts[key] = session_db.query(MetricEvent).filter(
                         MetricEvent.event_type == t,
                         MetricEvent.timestamp >= since
                     ).count()
+                
+                # Calculate Avg RTT from Probes
+                latency_q = session_db.query(EmailProbe).filter(
+                    EmailProbe.status == 'RECEIVED',
+                    EmailProbe.received_at >= since
+                )
+                avg_rtt = 0
+                if latency_q.count() > 0:
+                    total_lat = sum([(p.received_at - p.sent_at).total_seconds() for p in latency_q.all()])
+                    avg_rtt = round(total_lat / latency_q.count(), 2)
+                counts['avg_rtt'] = avg_rtt
                 return counts
             else:
                 # Use GlobalCounter for absolute Totals
@@ -1419,12 +1440,22 @@ def api_stats_overview():
                     'received': get_global('mail_received'),
                     'mail_tester': get_global('mail-tester'),
                     'smtp_diag': get_global('smtp-diag'),
-                    'blacklist': get_global('blacklist')
+                    'blacklist': get_global('blacklist'),
+                    'send_failure': get_global('send_failure'),
+                    'alert_sent': get_global('alert_sent'),
+                    'spf_fail': get_global('spf_fail'),
+                    'dkim_fail': get_global('dkim_fail'),
+                    'dmarc_fail': get_global('dmarc_fail'),
+                    'avg_rtt': 0 # Not tracked globally
                 }
 
         h_stats = get_timeframe_stats(hour_ago)
         d_stats = get_timeframe_stats(day_ago)
         a_stats = get_timeframe_stats()
+
+        # Success Rate calculation
+        for s in [h_stats, d_stats, a_stats]:
+            s['success_rate'] = round((s['received'] / s['sent'] * 100), 1) if s['sent'] > 0 else 100.0
 
         STATS_CACHE['data'] = {
             'hour': h_stats,

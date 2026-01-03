@@ -47,7 +47,7 @@
                     <i class="fa-solid fa-chart-pie me-2 text-primary"></i> Analytics Overview
                 </div>
                 <div class="card-body p-0">
-                    <div id="stats-overview" class="d-grid gap-2 py-3 px-3" style="grid-template-columns: 1fr 35px 35px 40px;">
+                    <div id="stats-overview" class="d-grid gap-x-3 gap-y-2 py-3 px-3" style="grid-template-columns: 1fr minmax(45px, auto) minmax(45px, auto) minmax(55px, auto); white-space: nowrap;">
                         <!-- Header -->
                         <div class="small text-muted fw-bold" style="font-size: 0.6rem;">METRIC</div>
                         <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">1H</div>
@@ -55,36 +55,78 @@
                         <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">ALL</div>
 
                         <!-- Mail Sent -->
-                        <div class="small fw-bold text-white-50">Sent</div>
+                        <div class="small fw-bold text-white-50">Mail Sent</div>
                         <div id="stat-h-sent" class="small text-center text-white fw-bold">0</div>
                         <div id="stat-d-sent" class="small text-center text-white fw-bold">0</div>
                         <div id="stat-a-sent" class="small text-center text-white fw-bold">0</div>
 
                         <!-- Mail Recv -->
-                        <div class="small fw-bold text-white-50">Recv</div>
+                        <div class="small fw-bold text-white-50">Mail Recv</div>
                         <div id="stat-h-recv" class="small text-center text-success fw-bold">0</div>
                         <div id="stat-d-recv" class="small text-center text-success fw-bold">0</div>
                         <div id="stat-a-recv" class="small text-center text-success fw-bold">0</div>
 
+                        <!-- Success Rate -->
+                        <div class="small fw-bold text-white-50">Success</div>
+                        <div id="stat-h-sr" class="small text-center text-info fw-bold">0%</div>
+                        <div id="stat-d-sr" class="small text-center text-info fw-bold">0%</div>
+                        <div id="stat-a-sr" class="small text-center text-info fw-bold">0%</div>
+
+                        <!-- Avg RTT -->
+                        <div class="small fw-bold text-white-50">Avg RTT</div>
+                        <div id="stat-h-rtt" class="small text-center text-warning fw-bold">0s</div>
+                        <div id="stat-d-rtt" class="small text-center text-warning fw-bold">0s</div>
+                        <div class="small text-center text-muted">-</div>
+
                         <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
 
                         <!-- Mail Tester -->
-                        <div class="small fw-bold text-white-50" style="white-space: nowrap;">Mail Tester</div>
+                        <div class="small fw-bold text-white-50">Mail Tester</div>
                         <div id="stat-h-mt" class="small text-center text-primary fw-bold">0</div>
                         <div id="stat-d-mt" class="small text-center text-primary fw-bold">0</div>
                         <div id="stat-a-mt" class="small text-center text-primary fw-bold">0</div>
 
                         <!-- SMTP Diag -->
-                        <div class="small fw-bold text-white-50" style="white-space: nowrap;">SMTP Diag</div>
+                        <div class="small fw-bold text-white-50">SMTP Diag</div>
                         <div id="stat-h-sd" class="small text-center text-primary fw-bold">0</div>
                         <div id="stat-d-sd" class="small text-center text-primary fw-bold">0</div>
                         <div id="stat-a-sd" class="small text-center text-primary fw-bold">0</div>
 
                         <!-- Blacklist -->
-                        <div class="small fw-bold text-white-50" style="white-space: nowrap;">Blacklist</div>
+                        <div class="small fw-bold text-white-50">Blacklist</div>
                         <div id="stat-h-bl" class="small text-center text-primary fw-bold">0</div>
                         <div id="stat-d-bl" class="small text-center text-primary fw-bold">0</div>
                         <div id="stat-a-bl" class="small text-center text-primary fw-bold">0</div>
+
+                        <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
+
+                        <!-- Alerts -->
+                        <div class="small fw-bold text-white-50">Alerts</div>
+                        <div id="stat-h-al" class="small text-center text-danger fw-bold">0</div>
+                        <div id="stat-d-al" class="small text-center text-danger fw-bold">0</div>
+                        <div id="stat-a-al" class="small text-center text-danger fw-bold">0</div>
+
+                        <!-- Send Failures -->
+                        <div class="small fw-bold text-white-50">Failures</div>
+                        <div id="stat-h-fl" class="small text-center text-danger fw-bold">0</div>
+                        <div id="stat-d-fl" class="small text-center text-danger fw-bold">0</div>
+                        <div id="stat-a-fl" class="small text-center text-danger fw-bold">0</div>
+
+                        <!-- Auth Fails -->
+                        <div class="small fw-bold text-white-50">SPF Fail</div>
+                        <div id="stat-h-spf" class="small text-center text-warning fw-bold">0</div>
+                        <div id="stat-d-spf" class="small text-center text-warning fw-bold">0</div>
+                        <div id="stat-a-spf" class="small text-center text-warning fw-bold">0</div>
+
+                        <div class="small fw-bold text-white-50">DKIM Fail</div>
+                        <div id="stat-h-dkim" class="small text-center text-warning fw-bold">0</div>
+                        <div id="stat-d-dkim" class="small text-center text-warning fw-bold">0</div>
+                        <div id="stat-a-dkim" class="small text-center text-warning fw-bold">0</div>
+
+                        <div class="small fw-bold text-white-50">DMARC Fail</div>
+                        <div id="stat-h-dmarc" class="small text-center text-warning fw-bold">0</div>
+                        <div id="stat-d-dmarc" class="small text-center text-warning fw-bold">0</div>
+                        <div id="stat-a-dmarc" class="small text-center text-warning fw-bold">0</div>
                     </div>
                 </div>
             </div>
@@ -154,23 +196,30 @@
         fetch('/api/stats/overview')
             .then(res => res.json())
             .then(data => {
-                document.getElementById('stat-h-sent').innerText = data.hour.sent;
-                document.getElementById('stat-h-recv').innerText = data.hour.received;
-                document.getElementById('stat-h-mt').innerText = data.hour.mail_tester;
-                document.getElementById('stat-h-sd').innerText = data.hour.smtp_diag;
-                document.getElementById('stat-h-bl').innerText = data.hour.blacklist;
-                
-                document.getElementById('stat-d-sent').innerText = data.day.sent;
-                document.getElementById('stat-d-recv').innerText = data.day.received;
-                document.getElementById('stat-d-mt').innerText = data.day.mail_tester;
-                document.getElementById('stat-d-sd').innerText = data.day.smtp_diag;
-                document.getElementById('stat-d-bl').innerText = data.day.blacklist;
+                const mapStats = (timeframe, prefix) => {
+                    const d = data[timeframe];
+                    document.getElementById(`stat-${prefix}-sent`).innerText = d.sent;
+                    document.getElementById(`stat-${prefix}-recv`).innerText = d.received;
+                    document.getElementById(`stat-${prefix}-sr`).innerText = d.success_rate + '%';
+                    
+                    if (prefix !== 'a') {
+                        document.getElementById(`stat-${prefix}-rtt`).innerText = d.avg_rtt + 's';
+                    }
 
-                document.getElementById('stat-a-sent').innerText = data.alltime.sent;
-                document.getElementById('stat-a-recv').innerText = data.alltime.received;
-                document.getElementById('stat-a-mt').innerText = data.alltime.mail_tester;
-                document.getElementById('stat-a-sd').innerText = data.alltime.smtp_diag;
-                document.getElementById('stat-a-bl').innerText = data.alltime.blacklist;
+                    document.getElementById(`stat-${prefix}-mt`).innerText = d.mail_tester;
+                    document.getElementById(`stat-${prefix}-sd`).innerText = d.smtp_diag;
+                    document.getElementById(`stat-${prefix}-bl`).innerText = d.blacklist;
+                    
+                    document.getElementById(`stat-${prefix}-al`).innerText = d.alert_sent;
+                    document.getElementById(`stat-${prefix}-fl`).innerText = d.send_failure;
+                    document.getElementById(`stat-${prefix}-spf`).innerText = d.spf_fail;
+                    document.getElementById(`stat-${prefix}-dkim`).innerText = d.dkim_fail;
+                    document.getElementById(`stat-${prefix}-dmarc`).innerText = d.dmarc_fail;
+                };
+
+                mapStats('hour', 'h');
+                mapStats('day', 'd');
+                mapStats('alltime', 'a');
             });
 
         fetch('/api/stats')
