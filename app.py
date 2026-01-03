@@ -76,6 +76,9 @@ class EmailProbe(Base):
     alert_sent = Column(Boolean, default=False)
     recipient_email = Column(String(120))
     alert_threshold = Column(Integer, default=300)
+    spf_status = Column(String(50))
+    dkim_status = Column(String(50))
+    dmarc_status = Column(String(50))
 
     @property
     def latency(self):
@@ -421,6 +424,13 @@ def check_inbox():
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
                                             recipient.alert_active = False
+                                        
+                                        # Extract Auth Results
+                                        auth_results = msg.get("Authentication-Results", "")
+                                        probe.spf_status = "pass" if "spf=pass" in auth_results.lower() else ("fail" if "spf=fail" in auth_results.lower() else "unknown")
+                                        probe.dkim_status = "pass" if "dkim=pass" in auth_results.lower() else ("fail" if "dkim=fail" in auth_results.lower() else "unknown")
+                                        probe.dmarc_status = "pass" if "dmarc=pass" in auth_results.lower() else ("fail" if "dmarc=fail" in auth_results.lower() else "unknown")
+
                                         probe.status = 'RECEIVED'
                                         session.commit()
                                         logger.info(f"Received probe {guid}.")
@@ -861,7 +871,10 @@ def api_stats():
                 'latency': round(p.latency, 2),
                 'status': p.status,
                 'recipient': p.recipient_email,
-                'alert_threshold': p.alert_threshold
+                'alert_threshold': p.alert_threshold,
+                'spf': p.spf_status,
+                'dkim': p.dkim_status,
+                'dmarc': p.dmarc_status
             })
         
         return jsonify(data)
@@ -891,7 +904,10 @@ def api_history():
                 'latency': round(p.latency, 2),
                 'status': p.status,
                 'recipient': p.recipient_email,
-                'alert_threshold': p.alert_threshold
+                'alert_threshold': p.alert_threshold,
+                'spf': p.spf_status,
+                'dkim': p.dkim_status,
+                'dmarc': p.dmarc_status
             })
         
         return jsonify(data)
