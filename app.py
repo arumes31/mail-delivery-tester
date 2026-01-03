@@ -685,7 +685,7 @@ def login():
 
     if len(LOGIN_ATTEMPTS[ip]) >= 5:
         retry_after = int(60 - (now - LOGIN_ATTEMPTS[ip][0]))
-        return render_template('login.html', error=f"Too many attempts. Please wait {retry_after}s.", show_totp=False)
+        return render_template('login.html', error=f"Too many attempts. Please wait {retry_after}s.", show_totp=False, retry_after=retry_after)
 
     if request.method == 'POST':
         username = request.form.get('username')
