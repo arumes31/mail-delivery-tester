@@ -19,7 +19,7 @@
                 <div class="mb-3">
                     <label class="form-label fw-bold">To Address:</label>
                     <div class="input-group">
-                        <input type="text" class="form-control bg-light" id="testEmail" value="{{ imap_user }}" readonly>
+                        <input type="text" class="form-control" style="background-color: #120d1d; color: #b0b0b0;" id="testEmail" value="{{ imap_user }}" readonly>
                         <button class="btn btn-outline-secondary" onclick="copyToClipboard('{{ imap_user }}')">
                             <i class="fa-solid fa-copy"></i>
                         </button>
@@ -28,7 +28,7 @@
                 <div class="mb-3">
                     <label class="form-label fw-bold">Subject Must Contain:</label>
                     <div class="input-group">
-                        <input type="text" class="form-control bg-light" id="testSubject" value="MAILDT-TEST: [unique-id]" readonly>
+                        <input type="text" class="form-control" style="background-color: #120d1d; color: #b0b0b0;" id="testSubject" value="MAILDT-TEST: [unique-id]" readonly>
                         <button class="btn btn-outline-secondary" id="copySubjectBtn">
                             <i class="fa-solid fa-copy"></i>
                         </button>
@@ -40,8 +40,8 @@
                     </button>
                 </div>
             </div>
-            <div class="card-footer bg-light small">
-                <i class="fa-solid fa-circle-info me-1 text-info"></i> The system polls for new mail every minute.
+            <div class="card-footer bg-light small" style="color: #000 !important; font-weight: 500;">
+                <i class="fa-solid fa-circle-info me-1 text-primary"></i> The system polls for new mail every minute.
             </div>
         </div>
 

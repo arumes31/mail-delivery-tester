@@ -366,6 +366,7 @@ def send_probe_email():
 # --- Global state for fast polling & rate limiting ---
 ACTIVE_TESTS = {} # {test_id: timestamp}
 IP_RATE_LIMITS = {} # {ip: [timestamps]}
+LOGIN_ATTEMPTS = {} # {ip: [timestamps]}
 LAST_IMAP_CHECK = datetime.datetime.min
 
 def check_inbox():
@@ -672,25 +673,50 @@ def login_required(f):
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # Rate Limiting: 5 login attempts per minute per IP
+    now = time.time()
+    ip = request.remote_addr
+    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
+        ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+
+    if ip not in LOGIN_ATTEMPTS:
+        LOGIN_ATTEMPTS[ip] = []
+    LOGIN_ATTEMPTS[ip] = [t for t in LOGIN_ATTEMPTS[ip] if now - t < 60]
+
+    if len(LOGIN_ATTEMPTS[ip]) >= 5:
+        retry_after = int(60 - (now - LOGIN_ATTEMPTS[ip][0]))
+        return render_template('login.html', error=f"Too many attempts. Please wait {retry_after}s.", show_totp=False)
+
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         totp_code = request.form.get('totp')
         
+        # Track attempt
+        LOGIN_ATTEMPTS[ip].append(now)
+
         if username == CONFIG['ADMIN_USER'] and password == CONFIG['ADMIN_PASSWORD']:
-            # Check TOTP if configured
+            # Password correct, now check if TOTP is needed
             if CONFIG['ADMIN_TOTP_SECRET']:
+                if not totp_code:
+                    # Password ok but TOTP missing, show TOTP field
+                    # We pass back username/password as hidden fields or just re-validate
+                    # To keep it simple and secure, we'll ask them to enter credentials again with TOTP
+                    # or better: we can keep the password in memory for this session temporarily 
+                    # but easiest is to show the field and let them submit all 3.
+                    return render_template('login.html', show_totp=True, username=username, password=password)
+                
                 totp = pyotp.TOTP(CONFIG['ADMIN_TOTP_SECRET'])
                 if not totp.verify(totp_code):
-                    return render_template('login.html', error="Invalid TOTP code", show_totp=True)
+                    return render_template('login.html', error="Invalid TOTP code", show_totp=True, username=username, password=password)
             
             session['logged_in'] = True
             next_url = request.args.get('next')
             return redirect(next_url or url_for('index'))
         else:
-            return render_template('login.html', error="Invalid credentials", show_totp=bool(CONFIG['ADMIN_TOTP_SECRET']))
+            return render_template('login.html', error="Invalid credentials", show_totp=False)
     
-    return render_template('login.html', show_totp=bool(CONFIG['ADMIN_TOTP_SECRET']))
+    return render_template('login.html', show_totp=False)
 
 @app.route('/logout')
 def logout():

@@ -12,6 +12,7 @@
         <div class="card shadow-lg border-0">
             <div class="card-body p-4">
                 <form method="POST" action="/login">
+                    {% if not show_totp %}
                     <div class="mb-3">
                         <label for="username" class="form-label small fw-bold text-uppercase opacity-75">Username</label>
                         <div class="input-group">
@@ -26,14 +27,16 @@
                             <input type="password" class="form-control bg-transparent border-start-0 ps-0" id="password" name="password" placeholder="Enter password" required>
                         </div>
                     </div>
-
-                    {% if show_totp %}
+                    {% else %}
+                    <input type="hidden" name="username" value="{{ username }}">
+                    <input type="hidden" name="password" value="{{ password }}">
                     <div class="mb-4">
                         <label for="totp" class="form-label small fw-bold text-uppercase opacity-75">2FA Code (TOTP)</label>
                         <div class="input-group">
                             <span class="input-group-text bg-transparent border-end-0 opacity-50"><i class="fa-solid fa-shield-halved"></i></span>
-                            <input type="text" class="form-control bg-transparent border-start-0 ps-0" id="totp" name="totp" placeholder="6-digit code" autocomplete="one-time-code">
+                            <input type="text" class="form-control bg-transparent border-start-0 ps-0" id="totp" name="totp" placeholder="6-digit code" autocomplete="one-time-code" required autofocus>
                         </div>
+                        <div class="form-text small opacity-50">Please enter the code from your authenticator app.</div>
                     </div>
                     {% endif %}
 
@@ -44,7 +47,7 @@
                     {% endif %}
 
                     <button type="submit" class="btn btn-primary w-100 py-2 fw-bold text-uppercase letter-spacing-1">
-                        Sign In <i class="fa-solid fa-right-to-bracket ms-2"></i>
+                        {% if show_totp %}Verify & Sign In{% else %}Sign In{% endif %} <i class="fa-solid fa-right-to-bracket ms-2"></i>
                     </button>
                 </form>
             </div>
