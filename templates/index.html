@@ -38,21 +38,20 @@
 
 <!-- History Modal -->
 <div class="modal fade" id="historyModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content shadow-lg border-primary">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="fa-solid fa-clock-rotate-left me-2"></i>History: <span id="historyRecipientTitle" class="fw-bold text-primary"></span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title text-white"><i class="fa-solid fa-clock-rotate-left me-2 text-primary"></i>History: <span id="historyRecipientTitle" class="fw-bold"></span></h5>
+                <button type="button" class="btn-close shadow-none" data-bs-dismiss="modal" style="filter: hue-rotate(240deg) brightness(1.5);"></button>
             </div>
             <div class="modal-body p-0">
                 <div class="table-responsive">
                     <table class="table table-sm table-striped mb-0">
-                        <thead class="table-light sticky-top">
+                        <thead class="table-dark sticky-top">
                             <tr>
                                 <th>Status</th>
                                 <th>Sent At</th>
-                                <th>Latency</th>
-                                <th>Threshold</th>
+                                <th>RTT</th>
                                 <th>SPF</th>
                                 <th>DKIM</th>
                                 <th>DMARC</th>
@@ -66,7 +65,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-outline-primary px-4" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -140,7 +139,7 @@
     function showHistory(recipient) {
         document.getElementById('historyRecipientTitle').innerText = recipient;
         const tbody = document.getElementById('modal-history-body');
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-3"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
         
         const modal = new bootstrap.Modal(document.getElementById('historyModal'));
         modal.show();
@@ -150,16 +149,15 @@
             .then(data => {
                 tbody.innerHTML = '';
                 if (data.length === 0) {
-                     tbody.innerHTML = '<tr><td colspan="8" class="text-center py-3">No history found.</td></tr>';
+                     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3">No history found.</td></tr>';
                      return;
                 }
                 data.forEach(item => {
                     const row = `
                         <tr>
                             <td>${getStatusBadge(item.status)}</td>
-                            <td>${new Date(item.sent_at).toLocaleString()}</td>
-                            <td>${item.latency}s</td>
-                            <td>${item.alert_threshold || '-'}s</td>
+                            <td class="small">${new Date(item.sent_at).toLocaleString()}</td>
+                            <td>${item.latency}s <small class="text-muted">/${item.alert_threshold}s</small></td>
                             <td>${getAuthBadge(item.spf)}</td>
                             <td>${getAuthBadge(item.dkim)}</td>
                             <td>${getAuthBadge(item.dmarc)}</td>

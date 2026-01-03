@@ -8,10 +8,11 @@ MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify
 
 - **Round-Trip Monitoring**: Automated probes to track **RTT (Round Trip Time)** and delivery reliability.
 - **Enhanced Live Monitor**: Real-time dashboard showing status, RTT, and **SPF/DKIM/DMARC** results.
+- **🎨 Cyber-Purple Aesthetic**: Permanent dark mode with a modern purple/indigo palette, neon accents, and a streamlined interface.
 - **🛡️ Privacy & Public Access**: 
     - **Email Masking**: Recipient addresses are automatically masked for unauthenticated users.
     - **Public Tools**: Mail Tester and SMTP Diagnostics are accessible without login.
-- **🧪 Mail Tester**: diagnostic tool (similar to mail-tester.com) to manually verify SPF, DKIM, DMARC, and detailed spam headers (O365, Mimecast, Proofpoint, etc.).
+- **🧪 Mail Tester**: Diagnostic tool (similar to mail-tester.com) to manually verify SPF, DKIM, DMARC, and detailed spam headers (O365, Mimecast, Proofpoint, etc.).
 - **🩺 SMTP Diagnostics**: Public protocol analyzer with session transcripts, banner checks, TLS verification, and open relay testing.
 - **Multi-Recipient Support**: Monitor multiple target mailboxes simultaneously with individual schedules.
 - **Smart Alerting**: 
@@ -61,7 +62,7 @@ Access the dashboard at `http://localhost:5000`. Persistent data will be stored 
 - **Backend**: Python (Flask)
 - **Database**: PostgreSQL 17 / SQLAlchemy
 - **Diagnostics**: `dnspython`, `socket`
-- **Frontend**: Bootstrap 5 (Zephyr), FontAwesome 6
+- **Frontend**: Bootstrap 5 (Dark), FontAwesome 6, Custom Cyber-Purple CSS
 - **Messaging**: `smtplib`, `imaplib`
 
 ---

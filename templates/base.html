@@ -1,23 +1,85 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MailDT - Delivery Monitor</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/logo.svg') }}">
-    <!-- Bootswatch Zephyr Theme -->
+    <!-- Bootstrap Dark -->
     <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
     <!-- FontAwesome -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome.min.css') }}">
     <style>
-        .navbar-brand { font-weight: 700; letter-spacing: 1px; display: flex; align-items: center; }
-        .brand-logo { height: 30px; width: 30px; margin-right: 10px; }
-        .table-middle td { vertical-align: middle; }
-        .guid-text { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.85em; }
+        :root {
+            --bs-primary: #8a2be2;
+            --bs-primary-rgb: 138, 43, 226;
+            --bs-link-color: #a259ff;
+            --bg-deep: #0f0a1a;
+            --bg-card: #1a1429;
+            --accent-purple: #6f42c1;
+        }
+
+        body { 
+            background-color: var(--bg-deep); 
+            color: #b0b0b0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        .text-muted { color: #6c757d !important; }
+        
+        .navbar { 
+            background: linear-gradient(135deg, #4b0082 0%, #1a1429 100%) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .navbar-brand { font-weight: 800; letter-spacing: 0.5px; display: flex; align-items: center; text-transform: uppercase; font-size: 1.2rem; }
+        .brand-logo { height: 32px; width: 32px; margin-right: 12px; filter: drop-shadow(0 0 8px rgba(138, 43, 226, 0.5)); }
+
+        .card { 
+            background-color: var(--bg-card); 
+            border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+        }
+
+        .card-header {
+            background-color: rgba(138, 43, 226, 0.1) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #b182ff !important;
+        }
+
+        .modal-header, .modal-footer {
+            border-color: rgba(255,255,255,0.1) !important;
+            background-color: rgba(138, 43, 226, 0.05) !important;
+        }
+
+        .btn-primary { background-color: var(--bs-primary); border-color: var(--bs-primary); }
+        .btn-primary:hover { background-color: #7b1fa2; border-color: #7b1fa2; }
+        
+        .btn-outline-primary { color: #b182ff; border-color: #b182ff; }
+        .btn-outline-primary:hover { background-color: #b182ff; border-color: #b182ff; color: #fff; }
+
+        .table { --bs-table-bg: transparent; color: #a0a0a0; }
+        .table-light { --bs-table-bg: rgba(255,255,255,0.02); --bs-table-color: #b182ff; }
+        .table-hover tbody tr:hover { background-color: rgba(138, 43, 226, 0.05); }
+
+        .badge.bg-success { background-color: #1e7e3433 !important; color: #28a745 !important; border: 1px solid #1e7e3455; }
+        .badge.bg-danger { background-color: #721c2433 !important; color: #dc3545 !important; border: 1px solid #721c2455; }
+        .badge.bg-warning { background-color: #85640433 !important; color: #ffc107 !important; border: 1px solid #85640455; }
+        .badge.bg-info { background-color: #17a2b833 !important; color: #22d3ee !important; border: 1px solid #17a2b855; }
+
+        .guid-text { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.8em; color: #555; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-deep); }
+        ::-webkit-scrollbar-thumb { background: #332a44; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--bs-primary); }
+
+        .toast { background-color: var(--bg-card); border: 1px solid var(--bs-primary); }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+    <nav class="navbar navbar-expand-lg navbar-dark shadow-lg sticky-top">
         <div class="container">
             <a class="navbar-brand" href="/">
                 <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="Logo" class="brand-logo">
@@ -28,15 +90,15 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-chart-line me-1"></i> Dashboard</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/mail-tester"><i class="fa-solid fa-flask me-1"></i> Mail Tester</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/smtp-test"><i class="fa-solid fa-envelope-circle-check me-1"></i> SMTP Diagnostics</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-chart-line me-1 text-primary"></i> Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/mail-tester"><i class="fa-solid fa-flask me-1 text-primary"></i> Mail Tester</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/smtp-test"><i class="fa-solid fa-envelope-circle-check me-1 text-primary"></i> SMTP Diagnostics</a></li>
                     {% if session.logged_in %}
-                    <li class="nav-item"><a class="nav-link" href="/recipients"><i class="fa-solid fa-users me-1"></i> Recipients</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/settings"><i class="fa-solid fa-gears me-1"></i> Settings</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/recipients"><i class="fa-solid fa-users me-1 text-primary"></i> Recipients</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/settings"><i class="fa-solid fa-gears me-1 text-primary"></i> Settings</a></li>
                     <li class="nav-item"><a class="nav-link text-warning" href="/logout"><i class="fa-solid fa-right-from-bracket me-1"></i> Logout</a></li>
                     {% else %}
-                    <li class="nav-item"><a class="nav-link" href="/login"><i class="fa-solid fa-right-to-bracket me-1"></i> Login</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/login"><i class="fa-solid fa-right-to-bracket me-1 text-primary"></i> Login</a></li>
                     {% endif %}
                 </ul>
             </div>

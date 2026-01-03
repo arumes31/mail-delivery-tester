@@ -1,47 +1,57 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-4">
-        <div class="card shadow-sm border-0">
-            <div class="card-header bg-primary text-white text-center">
-                <h4 class="mb-0"><i class="fa-solid fa-lock me-2"></i>Login</h4>
-            </div>
+<div class="row justify-content-center align-items-center" style="min-height: 70vh;">
+    <div class="col-md-5 col-lg-4">
+        <div class="text-center mb-4">
+            <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="Logo" class="mb-3" style="height: 80px; filter: drop-shadow(0 0 15px rgba(138, 43, 226, 0.6));">
+            <h2 class="fw-bold text-white">Welcome Back</h2>
+            <p class="text-muted">Sign in to manage your mail monitor</p>
+        </div>
+
+        <div class="card shadow-lg border-0">
             <div class="card-body p-4">
                 <form method="POST" action="/login">
                     <div class="mb-3">
-                        <label for="username" class="form-label fw-bold">Username</label>
+                        <label for="username" class="form-label small fw-bold text-uppercase opacity-75">Username</label>
                         <div class="input-group">
-                            <span class="input-group-text"><i class="fa-solid fa-user"></i></span>
-                            <input type="text" class="form-control" id="username" name="username" required>
+                            <span class="input-group-text bg-transparent border-end-0 opacity-50"><i class="fa-solid fa-user"></i></span>
+                            <input type="text" class="form-control bg-transparent border-start-0 ps-0" id="username" name="username" placeholder="Enter username" required autofocus>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label fw-bold">Password</label>
+                    <div class="mb-4">
+                        <label for="password" class="form-label small fw-bold text-uppercase opacity-75">Password</label>
                         <div class="input-group">
-                            <span class="input-group-text"><i class="fa-solid fa-key"></i></span>
-                            <input type="password" class="form-control" id="password" name="password" required>
+                            <span class="input-group-text bg-transparent border-end-0 opacity-50"><i class="fa-solid fa-lock"></i></span>
+                            <input type="password" class="form-control bg-transparent border-start-0 ps-0" id="password" name="password" placeholder="Enter password" required>
                         </div>
                     </div>
+
                     {% if show_totp %}
-                    <div class="mb-3">
-                        <label for="totp" class="form-label fw-bold">TOTP Code</label>
+                    <div class="mb-4">
+                        <label for="totp" class="form-label small fw-bold text-uppercase opacity-75">2FA Code (TOTP)</label>
                         <div class="input-group">
-                            <span class="input-group-text"><i class="fa-solid fa-shield-halved"></i></span>
-                            <input type="text" class="form-control" id="totp" name="totp" placeholder="123456" autocomplete="one-time-code" required>
+                            <span class="input-group-text bg-transparent border-end-0 opacity-50"><i class="fa-solid fa-shield-halved"></i></span>
+                            <input type="text" class="form-control bg-transparent border-start-0 ps-0" id="totp" name="totp" placeholder="6-digit code" autocomplete="one-time-code">
                         </div>
                     </div>
                     {% endif %}
+
                     {% if error %}
-                    <div class="alert alert-danger py-2 mb-3" role="alert">
-                        <i class="fa-solid fa-circle-exclamation me-1"></i> {{ error }}
+                    <div class="alert alert-danger py-2 small border-0 mb-4" role="alert">
+                        <i class="fa-solid fa-circle-exclamation me-2"></i> {{ error }}
                     </div>
                     {% endif %}
-                    <button type="submit" class="btn btn-primary w-100">
-                        Sign In <i class="fa-solid fa-arrow-right-to-bracket ms-1"></i>
+
+                    <button type="submit" class="btn btn-primary w-100 py-2 fw-bold text-uppercase letter-spacing-1">
+                        Sign In <i class="fa-solid fa-right-to-bracket ms-2"></i>
                     </button>
                 </form>
             </div>
+        </div>
+        
+        <div class="text-center mt-4 opacity-50 small">
+            &copy; 2026 MailDT System
         </div>
     </div>
 </div>

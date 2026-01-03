@@ -18,10 +18,10 @@
 <!-- Delete Confirmation Modal -->
 <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
     <div class="modal-dialog">
-        <div class="modal-content">
+        <div class="modal-content shadow-lg border-primary">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white shadow-none" data-bs-dismiss="modal" aria-label="Close" style="filter: hue-rotate(240deg) brightness(1.5);"></button>
             </div>
             <div class="modal-body">
                 <p>Are you sure you want to delete the recipient <strong id="deleteEmailDisplay"></strong>?</p>
@@ -71,8 +71,8 @@
                     <label class="form-check-label" for="emailAlertsInput"><i class="fa-solid fa-envelope me-1"></i> Email</label>
                 </div>
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="discordAlertsInput" checked>
-                    <label class="form-check-label" for="discordAlertsInput"><i class="fa-brands fa-discord me-1"></i> Discord</label>
+                    <input class="form-check-input" type="checkbox" id="discordAlertsInput">
+                    <label class="form-check-label" for="discordAlertsInput"><i class="fa-solid fa-brands fa-discord me-1"></i> Discord</label>
                 </div>
             </div>
             <div class="col-md-2 d-flex align-items-center pt-3">
