@@ -1,37 +1,93 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h2 class="mb-0">Live Monitor</h2>
-        <small class="text-muted">Auto-refreshing every 5 seconds</small>
-    </div>
-</div>
+<div class="row">
+    <div class="col-lg-9 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2 class="mb-0">Live Monitor</h2>
+                <small class="text-muted">Auto-refreshing every 5 seconds</small>
+            </div>
+        </div>
 
-<!-- Live Status Card -->
-<div class="card shadow-sm border-0">
-    <div class="card-header bg-light fw-bold text-uppercase small text-muted">
-        <i class="fa-solid fa-satellite-dish me-1"></i> Current Status
+        <!-- Live Status Card -->
+        <div class="card shadow-sm border-0">
+            <div class="card-header fw-bold text-uppercase small text-muted">
+                <i class="fa-solid fa-satellite-dish me-1"></i> Current Status
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle table-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Recipient</th>
+                                <th>Status</th>
+                                <th>Sent At (UTC)</th>
+                                <th>RTT <small class="text-muted">(Latency/Max)</small></th>
+                                <th>SPF</th>
+                                <th>DKIM</th>
+                                <th>DMARC</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-body">
+                            <!-- Data injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover mb-0 align-middle table-middle">
-                <thead class="table-light">
-                    <tr>
-                        <th>Recipient</th>
-                        <th>Status</th>
-                        <th>Sent At (UTC)</th>
-                        <th>RTT <small class="text-muted">(Latency/Max)</small></th>
-                        <th>SPF</th>
-                        <th>DKIM</th>
-                        <th>DMARC</th>
-                        <th class="text-end">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="stats-body">
-                    <!-- Data injected here -->
-                </tbody>
-            </table>
+
+    <!-- Sidebar Widget -->
+    <div class="col-lg-3">
+        <div class="sticky-top" style="top: 90px; z-index: 10;">
+            <div class="card shadow-lg border-0 mb-4">
+                <div class="card-header fw-bold small text-uppercase">
+                    <i class="fa-solid fa-chart-pie me-2 text-primary"></i> Analytics Overview
+                </div>
+                <div class="card-body p-0">
+                    <div id="stats-overview" class="d-grid gap-2 py-3 px-3" style="grid-template-columns: 1fr 35px 35px 40px;">
+                        <!-- Header -->
+                        <div class="small text-muted fw-bold" style="font-size: 0.6rem;">METRIC</div>
+                        <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">1H</div>
+                        <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">24H</div>
+                        <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">ALL</div>
+
+                        <!-- Mail Sent -->
+                        <div class="small fw-bold text-white-50">Sent</div>
+                        <div id="stat-h-sent" class="small text-center text-white fw-bold">0</div>
+                        <div id="stat-d-sent" class="small text-center text-white fw-bold">0</div>
+                        <div id="stat-a-sent" class="small text-center text-white fw-bold">0</div>
+
+                        <!-- Mail Recv -->
+                        <div class="small fw-bold text-white-50">Recv</div>
+                        <div id="stat-h-recv" class="small text-center text-success fw-bold">0</div>
+                        <div id="stat-d-recv" class="small text-center text-success fw-bold">0</div>
+                        <div id="stat-a-recv" class="small text-center text-success fw-bold">0</div>
+
+                        <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
+
+                        <!-- Mail Tester -->
+                        <div class="small fw-bold text-white-50" style="white-space: nowrap;">Mail Tester</div>
+                        <div id="stat-h-mt" class="small text-center text-primary fw-bold">0</div>
+                        <div id="stat-d-mt" class="small text-center text-primary fw-bold">0</div>
+                        <div id="stat-a-mt" class="small text-center text-primary fw-bold">0</div>
+
+                        <!-- SMTP Diag -->
+                        <div class="small fw-bold text-white-50" style="white-space: nowrap;">SMTP Diag</div>
+                        <div id="stat-h-sd" class="small text-center text-primary fw-bold">0</div>
+                        <div id="stat-d-sd" class="small text-center text-primary fw-bold">0</div>
+                        <div id="stat-a-sd" class="small text-center text-primary fw-bold">0</div>
+
+                        <!-- Blacklist -->
+                        <div class="small fw-bold text-white-50" style="white-space: nowrap;">Blacklist</div>
+                        <div id="stat-h-bl" class="small text-center text-primary fw-bold">0</div>
+                        <div id="stat-d-bl" class="small text-center text-primary fw-bold">0</div>
+                        <div id="stat-a-bl" class="small text-center text-primary fw-bold">0</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -94,6 +150,29 @@
     }
 
     function updateStats() {
+        // Fetch Overview Stats
+        fetch('/api/stats/overview')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('stat-h-sent').innerText = data.hour.sent;
+                document.getElementById('stat-h-recv').innerText = data.hour.received;
+                document.getElementById('stat-h-mt').innerText = data.hour.mail_tester;
+                document.getElementById('stat-h-sd').innerText = data.hour.smtp_diag;
+                document.getElementById('stat-h-bl').innerText = data.hour.blacklist;
+                
+                document.getElementById('stat-d-sent').innerText = data.day.sent;
+                document.getElementById('stat-d-recv').innerText = data.day.received;
+                document.getElementById('stat-d-mt').innerText = data.day.mail_tester;
+                document.getElementById('stat-d-sd').innerText = data.day.smtp_diag;
+                document.getElementById('stat-d-bl').innerText = data.day.blacklist;
+
+                document.getElementById('stat-a-sent').innerText = data.alltime.sent;
+                document.getElementById('stat-a-recv').innerText = data.alltime.received;
+                document.getElementById('stat-a-mt').innerText = data.alltime.mail_tester;
+                document.getElementById('stat-a-sd').innerText = data.alltime.smtp_diag;
+                document.getElementById('stat-a-bl').innerText = data.alltime.blacklist;
+            });
+
         fetch('/api/stats')
             .then(response => response.json())
             .then(data => {

@@ -125,7 +125,7 @@
         <div class="bg-overlay"></div>
     </div>
     <nav class="navbar navbar-expand-lg navbar-dark shadow-lg sticky-top">
-        <div class="container">
+        <div class="container-fluid px-lg-5">
             <a class="navbar-brand" href="/">
                 <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="Logo" class="brand-logo">
                 MailDT
@@ -151,7 +151,7 @@
         </div>
     </nav>
 
-    <div class="container mt-4">
+    <div class="container-fluid px-lg-5 mt-4">
         {% block content %}{% endblock %}
     </div>
 
@@ -231,13 +231,21 @@
 
             function swapBackgrounds() {
                 const nextLayer = activeLayer === 1 ? 2 : 1;
-                const layerEl = document.getElementById(`background-${nextLayer}`);
+                const nextLayerEl = document.getElementById(`background-${nextLayer}`);
+                const currLayerEl = document.getElementById(`background-${activeLayer}`);
                 
-                layerEl.style.backgroundImage = generateMeshSVG();
-                layerEl.classList.add('active');
-                document.getElementById(`background-${activeLayer}`).classList.remove('active');
+                // Pre-generate the next background
+                const nextDataUrl = generateMeshSVG();
                 
-                activeLayer = nextLayer;
+                // 1. Set the new background image on the inactive layer
+                nextLayerEl.style.backgroundImage = nextDataUrl;
+                
+                // 2. Wait a small moment for browser to register image, then fade in
+                setTimeout(() => {
+                    nextLayerEl.classList.add('active');
+                    currLayerEl.classList.remove('active');
+                    activeLayer = nextLayer;
+                }, 50);
             }
 
             // Initial Draw

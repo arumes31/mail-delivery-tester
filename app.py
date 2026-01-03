@@ -120,6 +120,24 @@ class MailTest(Base):
     dmarc_status = Column(String(50))
     spam_report = Column(String) # JSON string
 
+class ToolUsage(Base):
+    __tablename__ = 'tool_usage'
+    id = Column(Integer, primary_key=True)
+    tool_name = Column(String(50), index=True) # mail-tester, smtp-diag, blacklist
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    ip = Column(String(50))
+
+class MetricEvent(Base):
+    __tablename__ = 'metric_events'
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(20)) # 'sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist'
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+class GlobalCounter(Base):
+    __tablename__ = 'global_counters'
+    id = Column(Integer, primary_key=True)
+    counter_name = Column(String(50), unique=True)
+    count = Column(Integer, default=0)
 
 Base.metadata.create_all(engine)
 
@@ -129,7 +147,22 @@ def run_migrations():
     session = Session()
     try:
         from sqlalchemy import text
-        # ... (previous migration checks) ...
+        # Check for global_counters table
+        try:
+            session.execute(text("SELECT 1 FROM global_counters LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: creating global_counters table")
+            Base.metadata.create_all(engine)
+        # Check for tool_usage table (manual check since create_all handles new tables)
+        try:
+            session.execute(text("SELECT 1 FROM tool_usage LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: tool_usage table will be created by metadata.create_all")
+            Base.metadata.create_all(engine)
+        
+        # ... existing migrations ...
         try:
             session.execute(text("SELECT recipient_email FROM email_probes LIMIT 1"))
         except Exception:
@@ -182,20 +215,72 @@ def run_migrations():
 
 def reset_alert_states():
     """Resets alert_active state for all recipients on startup."""
-    session = Session()
+    session_db = Session()
     try:
-        updated = session.query(Recipient).update({Recipient.alert_active: False})
-        session.commit()
+        updated = session_db.query(Recipient).update({Recipient.alert_active: False})
+        session_db.commit()
         if updated > 0:
             logger.info(f"Startup: Reset alert state for {updated} recipients.")
     except Exception as e:
         logger.error(f"Failed to reset alert states: {e}")
-        session.rollback()
+        session_db.rollback()
     finally:
-        session.close()
+        session_db.close()
 
-run_migrations()
-reset_alert_states()
+def record_usage(tool_name):
+    """Records a tool usage event in the database."""
+    session_db = Session()
+    try:
+        ip = request.remote_addr
+        if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
+            ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+        
+        # 1. Update Lifetime Total
+        counter = session_db.query(GlobalCounter).filter_by(counter_name=tool_name).first()
+        if not counter:
+            counter = GlobalCounter(counter_name=tool_name, count=1)
+            session_db.add(counter)
+        else:
+            counter.count += 1
+
+        # 2. Record Time-stamped Event
+        event = MetricEvent(event_type=tool_name)
+        session_db.add(event)
+        
+        session_db.commit()
+    except Exception as e:
+        logger.error(f"Failed to record usage for {tool_name}: {e}")
+        session_db.rollback()
+    finally:
+        session_db.close()
+
+def increment_counter(name, session_provided=None):
+    """Increments a persistent global counter and records a metric event."""
+    session_db = session_provided or Session()
+    try:
+        # 1. Update Lifetime Total
+        counter = session_db.query(GlobalCounter).filter_by(counter_name=name).first()
+        if not counter:
+            counter = GlobalCounter(counter_name=name, count=1)
+            session_db.add(counter)
+        else:
+            counter.count += 1
+        
+        # 2. Record Time-stamped Event
+        event_map = {'mail_sent': 'sent', 'mail_received': 'received'}
+        event_type = event_map.get(name, name)
+        event = MetricEvent(event_type=event_type)
+        session_db.add(event)
+
+        if not session_provided:
+            session_db.commit()
+    except Exception as e:
+        logger.error(f"Failed to increment counter {name}: {e}")
+        if not session_provided:
+            session_db.rollback()
+    finally:
+        if not session_provided:
+            session_db.close()
 
 # --- Mail Logic ---
 
@@ -230,13 +315,6 @@ def send_probe_email():
             for recipient in recipients:
                 probe_guid = str(uuid.uuid4())
                 subject = f"MAILDT-PROBE: {probe_guid}"
-                
-                # HTML Body
-                # Using a simple CDN for the logo or Base64 is best for emails. 
-                # Since we generated it locally, let's embed a simplified version or just use a text header to avoid broken images if the app isn't public.
-                # However, to be "modern", I will embed a public URL placeholder that you can replace, 
-                # OR I can use a standard nice looking unicode/CSS header.
-                # Let's use a nice CSS header block with the name to be safe and reliable.
                 
                 html_body = f"""
                 <!DOCTYPE html>
@@ -304,28 +382,18 @@ def send_probe_email():
                     )
                     session.add(probe)
                     
-                    # If we successfully sent, and we were in a SEND_ERROR alert state, we should probably reset?
-                    # Actually, recovery usually happens in check_inbox. 
-                    # But if the error was purely SMTP, then check_inbox might never see a recovery mail.
-                    # Let's check if the previous status for this recipient was SEND_ERROR.
-                    
-                    # For SMTP recovery, we can reset if the send succeeded.
                     if recipient.alert_active:
-                        # Optional: Send a specific SMTP recovery alert? 
-                        # Or just let it reset so the next failure triggers a new alert.
-                        # Since we want "send ok after", let's send a recovery if it was a SEND_ERROR.
-                        
-                        # Find the last probe status
                         last_probe = session.query(EmailProbe).filter_by(recipient_email=recipient.email).order_by(desc(EmailProbe.sent_at)).offset(1).first()
                         if last_probe and last_probe.status == 'SEND_ERROR':
-                            msg = f"✅ **Mail Send Recovered**\nSuccessfully sent probe to `{recipient.email}` after previous failure."
+                            msg_rec = f"✅ **Mail Send Recovered**\nSuccessfully sent probe to `{recipient.email}` after previous failure."
                             if recipient.discord_alerts_enabled:
-                                send_discord_alert(msg)
+                                send_discord_alert(msg_rec)
                             recipient.alert_active = False
                     
                     # Update next send time
                     recipient.next_send_at = now + datetime.timedelta(seconds=recipient.send_interval)
                     
+                    increment_counter('mail_sent', session_provided=session)
                     logger.info(f"Sent probe {probe_guid} to {recipient.email}")
                 except Exception as send_err:
                     err_msg = f"❌ **Mail Send Failure**\nFailed to send probe to `{recipient.email}`.\nError: `{str(send_err)}`"
@@ -343,18 +411,14 @@ def send_probe_email():
                     
                     # Trigger Alert only if not already in alert state
                     if not recipient.alert_active:
-                        logger.info(f"[DEBUG] Alerting: Initial failure for {recipient.email}. Sending alert now.")
                         if recipient.discord_alerts_enabled:
                             send_discord_alert(err_msg)
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
                         recipient.alert_active = True
-                    else:
-                        logger.info(f"[DEBUG] Alerting: Failure for {recipient.email} suppressed. Recipient already in alert state.")
                     
                     # Still update next send time
                     recipient.next_send_at = now + datetime.timedelta(seconds=recipient.send_interval)
-                    logger.info(f"[DEBUG] Next retry for {recipient.email} scheduled at {recipient.next_send_at}")
 
         session.commit()
 
@@ -370,6 +434,12 @@ IP_RATE_LIMITS = {} # {ip: [timestamps]}
 LOGIN_ATTEMPTS = {} # {ip: [timestamps]}
 BLACKLIST_ATTEMPTS = {} # {ip: [timestamps]}
 LAST_IMAP_CHECK = datetime.datetime.min
+
+# Cache for stats overview
+STATS_CACHE = {
+    'data': None,
+    'timestamp': None
+}
 
 def check_inbox():
     """Checks IMAP for returned probe emails and active tests."""
@@ -444,6 +514,7 @@ def check_inbox():
 
                                         probe.status = 'RECEIVED'
                                         session.commit()
+                                        increment_counter('mail_received')
                                         logger.info(f"Received probe {guid}.")
                                 mail.store(e_id, '+FLAGS', r'\Deleted')
                         except Exception as parse_err:
@@ -906,6 +977,8 @@ def api_blacklist_check():
     BLACKLIST_ATTEMPTS[ip_addr].append(now)
     remaining = 2 - len(BLACKLIST_ATTEMPTS[ip_addr])
 
+    record_usage('blacklist')
+
     target = request.args.get('target', '').strip()
     if not target:
         return jsonify({'error': 'No target (domain or IP) provided'}), 400
@@ -1031,6 +1104,8 @@ def api_smtp_test():
     
     IP_RATE_LIMITS[ip].append(now)
     remaining = 5 - len(IP_RATE_LIMITS[ip])
+    
+    record_usage('smtp-diag')
     
     host = request.args.get('host', CONFIG['SMTP_HOST'])
     port = request.args.get('port', type=int)
@@ -1195,6 +1270,7 @@ def api_mail_tester_check(test_id):
 @app.route('/api/mail-tester/start/<test_id>', methods=['POST'])
 def api_mail_tester_start(test_id):
     ACTIVE_TESTS[test_id] = datetime.datetime.utcnow()
+    record_usage('mail-tester')
     logger.info(f"Fast polling enabled for test: {test_id}")
     return jsonify({'status': 'started'})
 
@@ -1248,12 +1324,11 @@ def delete_recipient(r_id):
     try:
         r = session.get(Recipient, r_id)
         if r:
-            # Delete associated probe history first
-            session.query(EmailProbe).filter_by(recipient_email=r.email).delete()
+            # We no longer delete associated probe history to keep metrics persistent
             # Delete the recipient
             session.delete(r)
             session.commit()
-            return jsonify({'message': 'Deleted and history cleared'})
+            return jsonify({'message': 'Deleted (History preserved for metrics)'})
         return jsonify({'error': 'Not found'}), 404
     finally:
         session.close()
@@ -1306,20 +1381,82 @@ def mask_email(email):
     except:
         return email
 
+@app.route('/api/stats/overview')
+def api_stats_overview():
+    global STATS_CACHE
+    now = datetime.datetime.utcnow()
+    is_logged_in = 'logged_in' in session
+    
+    # Return cached data if it's less than 120 seconds old (only for public users)
+    if not is_logged_in and STATS_CACHE['data'] and STATS_CACHE['timestamp']:
+        if (now - STATS_CACHE['timestamp']).total_seconds() < 120:
+            return jsonify(STATS_CACHE['data'])
+
+    session_db = Session()
+    try:
+        hour_ago = now - datetime.timedelta(hours=1)
+        day_ago = now - datetime.timedelta(days=1)
+
+        def get_timeframe_stats(since=None):
+            if since:
+                # Use MetricEvent for time-windowed stats (independent of probes)
+                counts = {}
+                types = ['sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist']
+                for t in types:
+                    counts[t.replace('-', '_')] = session_db.query(MetricEvent).filter(
+                        MetricEvent.event_type == t,
+                        MetricEvent.timestamp >= since
+                    ).count()
+                return counts
+            else:
+                # Use GlobalCounter for absolute Totals
+                def get_global(name):
+                    c = session_db.query(GlobalCounter).filter_by(counter_name=name).first()
+                    return c.count if c else 0
+                
+                return {
+                    'sent': get_global('mail_sent'),
+                    'received': get_global('mail_received'),
+                    'mail_tester': get_global('mail-tester'),
+                    'smtp_diag': get_global('smtp-diag'),
+                    'blacklist': get_global('blacklist')
+                }
+
+        h_stats = get_timeframe_stats(hour_ago)
+        d_stats = get_timeframe_stats(day_ago)
+        a_stats = get_timeframe_stats()
+
+        STATS_CACHE['data'] = {
+            'hour': h_stats,
+            'day': d_stats,
+            'alltime': a_stats
+        }
+        STATS_CACHE['timestamp'] = now
+
+        return jsonify(STATS_CACHE['data'])
+    finally:
+        session_db.close()
+
 @app.route('/api/stats')
 def api_stats():
-    """Returns the latest probe for each recipient."""
+    """Returns the latest probe for each ACTIVE recipient."""
     session_db = Session()
     is_logged_in = 'logged_in' in session
     try:
-        # Subquery to find the latest probe ID for each recipient
+        # 1. Get list of all currently existing recipient emails
+        active_recipient_emails = [r.email for r in session_db.query(Recipient).all()]
+        
+        if not active_recipient_emails:
+            return jsonify([])
+
+        # 2. Subquery to find the latest probe ID for each recipient
         from sqlalchemy import func
         subq = session_db.query(
             EmailProbe.recipient_email,
             func.max(EmailProbe.sent_at).label('max_sent_at')
-        ).group_by(EmailProbe.recipient_email).subquery()
+        ).filter(EmailProbe.recipient_email.in_(active_recipient_emails)).group_by(EmailProbe.recipient_email).subquery()
         
-        # Join to get full details
+        # 3. Join to get full details
         latest_probes = session_db.query(EmailProbe).join(
             subq,
             (EmailProbe.recipient_email == subq.c.recipient_email) & 
@@ -1382,16 +1519,23 @@ def api_history():
         session_db.close()
 
 def cleanup_old_probes():
-    """Deletes probes older than 7 days."""
+    """Deletes probes older than 7 days and metrics older than 30 days."""
     session_db = Session()
     try:
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=7)
-        deleted = session_db.query(EmailProbe).filter(EmailProbe.sent_at < cutoff).delete()
+        # 1. Clean Probes (7 days)
+        cutoff_probes = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+        deleted_probes = session_db.query(EmailProbe).filter(EmailProbe.sent_at < cutoff_probes).delete()
+        
+        # 2. Clean Metric Events (30 days) - keep longer for Day stats
+        cutoff_metrics = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+        deleted_metrics = session_db.query(MetricEvent).filter(MetricEvent.timestamp < cutoff_metrics).delete()
+
         session_db.commit()
-        if deleted > 0:
-            logger.info(f"Cleanup: Deleted {deleted} old probes.")
+        if deleted_probes > 0 or deleted_metrics > 0:
+            logger.info(f"Cleanup: Deleted {deleted_probes} probes and {deleted_metrics} metric events.")
     except Exception as e:
         logger.error(f"Error in cleanup: {e}")
+        session_db.rollback()
     finally:
         session_db.close()
 
