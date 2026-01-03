@@ -10,21 +10,24 @@ MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify
 
 - **Round-Trip Monitoring**: Automated probes to track **RTT (Round Trip Time)** and delivery reliability.
 - **Enhanced Live Monitor**: Real-time dashboard showing status, RTT, and **SPF/DKIM/DMARC** results.
-- **🎨 Cyber-Purple Aesthetic**: Permanent dark mode with a modern purple/indigo palette, neon accents, and a streamlined interface.
+- **📊 Sidebar Analytics**: Persistent, real-time widget showing mail and tool usage stats for the last hour, 24h, and all-time.
+- **🎨 Cyber-Purple Aesthetic**: Permanent dark mode with a modern purple/indigo palette, neon accents, and a dynamic SVG mesh background.
 - **🛡️ Privacy & Public Access**: 
     - **Email Masking**: Recipient addresses are automatically masked for unauthenticated users.
-    - **Public Tools**: Mail Tester and SMTP Diagnostics are accessible without login.
+    - **Public Tools**: Mail Tester, SMTP Diagnostics, and Blacklist Check are accessible without login.
 - **🧪 Mail Tester**: Diagnostic tool (similar to mail-tester.com) to manually verify SPF, DKIM, DMARC, and detailed spam headers (O365, Mimecast, Proofpoint, etc.).
 - **🩺 SMTP Diagnostics**: Public protocol analyzer with session transcripts, banner checks, TLS verification, and open relay testing.
+- **🛡️ Blacklist Check**: Deep DNSBL analysis for domains and their MX nodes against 15+ major providers.
 - **Multi-Recipient Support**: Monitor multiple target mailboxes simultaneously with individual schedules.
 - **Smart Alerting**: 
     - Notifications via **Discord Webhooks** and **Email**.
     - Alert on **Missing** emails, **Send Failures**, and **Service Recovery**.
 - **Resilient Infrastructure**:
     - **PostgreSQL 17**: High-performance persistence with host-mapped volume.
+    - **Persistent Metrics**: Global counters and event logging ensure statistics survive data cleanups and recipient deletions.
     - **Smart DNS**: Multi-provider DNS resolution with Google DNS fallback for reliable PTR lookups.
-    - **Rate Limiting**: IP-based protection (5 tests/min) with live countdown timers for public tools.
-- **Security**: **2FA (TOTP)** support for admin access and secure session management.
+    - **Performance**: Intelligent 120s caching for public users with real-time bypass for admins.
+- **Security**: **2FA (TOTP)** support for admin access and IP-based rate limiting across all diagnostic tools.
 
 ## 🛠️ Setup & Installation
 
@@ -57,6 +60,7 @@ Access the dashboard at `http://localhost:5000`. Persistent data will be stored 
 - **Live Monitor**: Publicly viewable health and authentication status (masked emails).
 - **Mail Tester**: Public manual verification of mail headers and spam scores.
 - **SMTP Diagnostics**: Public deep protocol analysis and session transcripts.
+- **Blacklist Check**: Public reputation scanning for domains and IPs.
 - **System Diagnostics**: (Admin) Internal health check of your configured SMTP/IMAP credentials.
 - **Recipients**: (Admin) Manage target addresses and alert thresholds.
 
