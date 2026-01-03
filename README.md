@@ -1,6 +1,8 @@
 # MailDT - Mail Delivery Monitor
 
-![MailDT Logo](static/img/logo.svg)
+<p align="center">
+  <img src="static/img/logo.svg" width="120" alt="MailDT Logo">
+</p>
 
 MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify the reliability, latency, and authentication health of your email infrastructure. It performs "loopback" testing by sending unique probes via SMTP and watching for their arrival via IMAP.
 
