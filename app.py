@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import smtplib
 import ssl
@@ -367,6 +368,7 @@ def send_probe_email():
 ACTIVE_TESTS = {} # {test_id: timestamp}
 IP_RATE_LIMITS = {} # {ip: [timestamps]}
 LOGIN_ATTEMPTS = {} # {ip: [timestamps]}
+BLACKLIST_ATTEMPTS = {} # {ip: [timestamps]}
 LAST_IMAP_CHECK = datetime.datetime.min
 
 def check_inbox():
@@ -875,6 +877,132 @@ def api_diagnostics_run():
 @app.route('/smtp-test')
 def smtp_test_page():
     return render_template('smtp_test.html', host=CONFIG['SMTP_HOST'])
+
+@app.route('/blacklist-check')
+def blacklist_check_page():
+    return render_template('blacklist_check.html')
+
+@app.route('/api/diagnostics/blacklist')
+def api_blacklist_check():
+    # Rate Limiting: 5 per minute per IP
+    now = time.time()
+    ip_addr = request.remote_addr
+    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
+        ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+
+    if ip_addr not in BLACKLIST_ATTEMPTS:
+        BLACKLIST_ATTEMPTS[ip_addr] = []
+    
+    BLACKLIST_ATTEMPTS[ip_addr] = [t for t in BLACKLIST_ATTEMPTS[ip_addr] if now - t < 60]
+    
+    if len(BLACKLIST_ATTEMPTS[ip_addr]) >= 2:
+        retry_after = int(60 - (now - BLACKLIST_ATTEMPTS[ip_addr][0]))
+        return jsonify({
+            'error': 'Rate limit exceeded', 
+            'message': f'Please wait {retry_after} seconds before running another check.',
+            'retry_after': retry_after
+        }), 429
+    
+    BLACKLIST_ATTEMPTS[ip_addr].append(now)
+    remaining = 2 - len(BLACKLIST_ATTEMPTS[ip_addr])
+
+    target = request.args.get('target', '').strip()
+    if not target:
+        return jsonify({'error': 'No target (domain or IP) provided'}), 400
+
+    # Resolve to IP if domain
+    ip = target
+    is_ip = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target)
+    
+    mx_ips = []
+    if not is_ip:
+        try:
+            # Check MX records if it's a domain
+            try:
+                # Use Google DNS for MX lookup
+                mx_resolver = dns.resolver.Resolver()
+                mx_resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+                mx_answers = mx_resolver.resolve(target, 'MX')
+                for mx in mx_answers:
+                    mx_host = str(mx.exchange).rstrip('.')
+                    try:
+                        mx_ip = socket.gethostbyname(mx_host)
+                        if mx_ip not in mx_ips: mx_ips.append(mx_ip)
+                    except: pass
+            except: pass
+
+            # Attempt 1: Default Resolver for main IP
+            ip = socket.gethostbyname(target)
+        except:
+            try:
+                # Attempt 2: Google DNS Fallback
+                resolver = dns.resolver.Resolver()
+                resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+                answers = resolver.resolve(target, 'A')
+                if answers:
+                    ip = str(answers[0])
+                else: raise Exception("No A record")
+            except Exception as e:
+                return jsonify({'error': f'Could not resolve hostname: {target} ({str(e)})'}), 400
+
+    dnsbls = [
+        "zen.spamhaus.org",
+        "bl.spamcop.net",
+        "dnsbl.sorbs.net",
+        "b.barracudacentral.org",
+        "psbl.surriel.com",
+        "dnsbl-1.uceprotect.net",
+        "dnsbl-2.uceprotect.net",
+        "dnsbl-3.uceprotect.net",
+        "ix.dnsbl.manitu.net",
+        "bl.mailspike.net",
+        "dnsbl.spfbl.net",
+        "hostkarma.junkemailfilter.com",
+        "ubl.unsubscore.com",
+        "dnsbl.dronebl.org",
+        "backscatter.surriel.com",
+        "truncate.gbudb.net",
+        "dnsbl.kjsl.com"
+    ]
+
+    def check_ip(ip_addr):
+        ip_results = []
+        reversed_ip = ".".join(ip_addr.split(".")[::-1])
+        for bl in dnsbls:
+            query = f"{reversed_ip}.{bl}"
+            try:
+                resolver = dns.resolver.Resolver()
+                resolver.timeout = 1.5
+                resolver.lifetime = 1.5
+                answers = resolver.resolve(query, "A")
+                ip_results.append({'dnsbl': bl, 'status': 'listed', 'details': str(answers[0])})
+            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+                ip_results.append({'dnsbl': bl, 'status': 'clean', 'details': 'Not listed'})
+            except:
+                ip_results.append({'dnsbl': bl, 'status': 'error', 'details': 'Timeout/Error'})
+        return ip_results
+
+    # Check main target IP
+    main_results = check_ip(ip)
+    
+    # Check MX IPs if any
+    mx_reports = []
+    for m_ip in mx_ips:
+        if m_ip != ip: # Avoid duplicate work if domain A record points to same IP as MX
+            mx_reports.append({
+                'ip': m_ip,
+                'results': check_ip(m_ip),
+                'listed_count': len([r for r in check_ip(m_ip) if r['status'] == 'listed'])
+            })
+
+    return jsonify({
+        'target': target,
+        'resolved_ip': ip,
+        'results': main_results,
+        'listed_count': len([r for r in main_results if r['status'] == 'listed']),
+        'mx_reports': mx_reports,
+        'remaining_quota': remaining
+    })
 
 @app.route('/api/diagnostics/smtp-test')
 def api_smtp_test():

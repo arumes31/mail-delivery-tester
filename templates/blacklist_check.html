@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h2><i class="fa-solid fa-list-check me-2"></i>Blacklist Check</h2>
+            <p class="text-muted mb-0">Check if a domain or IP is listed on common DNS-based Blackhole Lists (DNSBL).</p>
+        </div>
+        <a href="/" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <form id="blacklistForm" class="row g-3 align-items-end">
+                    <div class="col-md-9">
+                        <label for="targetInput" class="form-label fw-bold">Domain or IP Address</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-globe"></i></span>
+                            <input type="text" class="form-control" id="targetInput" placeholder="e.g. example.com or 1.2.3.4" required>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" id="checkBtn" class="btn btn-primary w-100">
+                            <i class="fa-solid fa-search me-2"></i> Run Check
+                        </button>
+                        <div id="quotaDisplay" class="text-center mt-1 x-small text-muted" style="font-size: 0.75rem;">
+                            Limit: 2 checks / min
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="resultsWrapper" style="display: none;">
+    <div class="row mb-4">
+        <div class="col-md-12 text-center">
+            <div id="statusAlert" class="alert d-inline-block px-5 py-3 border-0 shadow-sm">
+                <h3 id="summaryTitle" class="mb-1">---</h3>
+                <p id="summaryText" class="mb-0 opacity-75">---</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-primary fw-bold">
+                    <i class="fa-solid fa-database me-2"></i> Primary Target: <span id="mainTargetName"></span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Blacklist Provider</th>
+                                    <th>Status</th>
+                                    <th>Return Code / Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('blacklistForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const target = document.getElementById('targetInput').value;
+        runBlacklistCheck(target);
+    });
+
+    let countdownInterval = null;
+
+    function runBlacklistCheck(target) {
+        const btn = document.getElementById('checkBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Checking...';
+        
+        const quotaDisplay = document.getElementById('quotaDisplay');
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        document.getElementById('resultsWrapper').style.display = 'block';
+        const tbody = document.getElementById('results-body');
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center py-5"><div class="spinner-border text-primary mb-3"></div><br>Querying multiple DNSBL providers for <strong>' + target + '</strong>...</td></tr>';
+        
+        const alert = document.getElementById('statusAlert');
+        alert.className = 'alert alert-info d-inline-block px-5 py-3 border-0 shadow-sm';
+        document.getElementById('summaryTitle').innerText = 'Analysis in Progress';
+        document.getElementById('summaryText').innerText = 'Please wait while we gather data.';
+
+        fetch(`/api/diagnostics/blacklist?target=${encodeURIComponent(target)}`)
+            .then(res => {
+                if (res.status === 429) {
+                    return res.json().then(d => { 
+                        startCountdown(d.retry_after || 60);
+                        throw new Error(d.message); 
+                    });
+                }
+                return res.json();
+            })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-search me-2"></i> Run Check';
+                
+                if (data.error) {
+                    showToast(data.error, 'Error', 'danger');
+                    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger py-3">' + data.error + '</td></tr>';
+                    return;
+                }
+
+                quotaDisplay.innerText = `Remaining: ${data.remaining_quota} / 2 per min`;
+                quotaDisplay.classList.remove('text-danger');
+                renderResults(data);
+            })
+            .catch(err => {
+                if (!countdownInterval) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-search me-2"></i> Run Check';
+                }
+                showToast(err.message, 'Rate Limit', 'warning');
+            });
+    }
+
+    function startCountdown(seconds) {
+        const quotaDisplay = document.getElementById('quotaDisplay');
+        const btn = document.getElementById('checkBtn');
+        quotaDisplay.classList.add('text-danger');
+        
+        let remaining = seconds;
+        const updateText = () => {
+            quotaDisplay.innerText = `Rate limit exceeded. Wait ${remaining}s...`;
+            btn.innerHTML = `<i class="fa-solid fa-clock me-2"></i> Wait ${remaining}s`;
+        };
+
+        updateText();
+        countdownInterval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+                quotaDisplay.innerText = 'Limit: 2 checks / min';
+                quotaDisplay.classList.remove('text-danger');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-search me-2"></i> Run Check';
+            } else {
+                updateText();
+            }
+        }, 1000);
+    }
+
+    function renderResults(data) {
+        const resultsWrapper = document.getElementById('resultsWrapper');
+        // Clear previous dynamic MX sections
+        const dynamicSections = resultsWrapper.querySelectorAll('.mx-section');
+        dynamicSections.forEach(s => s.remove());
+
+        const tbody = document.getElementById('results-body');
+        tbody.innerHTML = '';
+        
+        // Render Main Target Table
+        document.getElementById('mainTargetName').innerText = data.target + ' (' + data.resolved_ip + ')';
+        renderTableRows(tbody, data.results);
+
+        // Render MX Sections
+        if (data.mx_reports && data.mx_reports.length > 0) {
+            data.mx_reports.forEach((mx, index) => {
+                const section = document.createElement('div');
+                section.className = 'row mt-5 mx-section';
+                section.innerHTML = `
+                    <div class="col-md-12">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-dark text-info fw-bold d-flex justify-content-between">
+                                <span><i class="fa-solid fa-server me-2"></i> MX Node: ${mx.ip}</span>
+                                <span class="badge ${mx.listed_count > 0 ? 'bg-danger' : 'bg-success'}">${mx.listed_count > 0 ? mx.listed_count + ' LISTINGS' : 'CLEAN'}</span>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0 align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Blacklist Provider</th>
+                                                <th>Status</th>
+                                                <th>Return Code / Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="mx-results-body-${index}">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                resultsWrapper.appendChild(section);
+                renderTableRows(document.getElementById(`mx-results-body-${index}`), mx.results);
+            });
+        }
+
+        const alert = document.getElementById('statusAlert');
+        const title = document.getElementById('summaryTitle');
+        const text = document.getElementById('summaryText');
+
+        if (data.listed_count > 0) {
+            alert.className = 'alert alert-danger d-inline-block px-5 py-3 border-0 shadow-sm';
+            title.innerText = 'Listed on ' + data.listed_count + ' Blacklists!';
+            text.innerText = 'The primary target was found on several DNSBLs.';
+        } else {
+            alert.className = 'alert alert-success d-inline-block px-5 py-3 border-0 shadow-sm';
+            title.innerText = 'Primary IP is Clean';
+            text.innerText = 'No listings found for the main server.';
+        }
+    }
+
+    function renderTableRows(tbody, results) {
+        tbody.innerHTML = '';
+        results.forEach(r => {
+            let statusBadge = '';
+            let rowClass = '';
+            if (r.status === 'listed') {
+                statusBadge = '<span class="badge bg-danger">LISTED</span>';
+                rowClass = 'table-danger';
+            } else if (r.status === 'clean') {
+                statusBadge = '<span class="badge bg-success">CLEAN</span>';
+            } else {
+                statusBadge = '<span class="badge bg-secondary">ERROR</span>';
+            }
+
+            tbody.innerHTML += `
+                <tr class="${rowClass}">
+                    <td class="fw-bold small">${r.dnsbl}</td>
+                    <td>${statusBadge}</td>
+                    <td class="font-monospace small opacity-75">${r.details}</td>
+                </tr>
+            `;
+        });
+    }
+</script>
+{% endblock %}
