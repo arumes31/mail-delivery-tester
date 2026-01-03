@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <h2><i class="fa-solid fa-flask me-2"></i>Mail Tester</h2>
+        <p class="text-muted">Test your email delivery, SPF, DKIM, and DMARC settings by sending an email to this system.</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-5">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-primary text-white fw-bold">
+                <i class="fa-solid fa-vial me-1"></i> Start New Test
+            </div>
+            <div class="card-body">
+                <p>To test your mail setup, send an email with the following details:</p>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">To Address:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control bg-light" id="testEmail" value="{{ imap_user }}" readonly>
+                        <button class="btn btn-outline-secondary" onclick="copyToClipboard('{{ imap_user }}')">
+                            <i class="fa-solid fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Subject Must Contain:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control bg-light" id="testSubject" value="MAILDT-TEST: [unique-id]" readonly>
+                        <button class="btn btn-outline-secondary" id="copySubjectBtn">
+                            <i class="fa-solid fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="d-grid">
+                    <button class="btn btn-primary" id="startTestBtn">
+                        <i class="fa-solid fa-play me-1"></i> Generate ID & Listen
+                    </button>
+                </div>
+            </div>
+            <div class="card-footer bg-light small">
+                <i class="fa-solid fa-circle-info me-1 text-info"></i> The system polls for new mail every minute.
+            </div>
+        </div>
+
+        <div id="statusAlert" class="alert alert-info d-none">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-3" role="status"></div>
+                <span><span id="statusText">Waiting for your email...</span> <strong id="timer">0s</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div id="resultCard" class="card shadow-sm border-0 d-none">
+            <div class="card-header bg-success text-white fw-bold">
+                <i class="fa-solid fa-check-circle me-1"></i> Email Received!
+            </div>
+            <div class="card-body p-0">
+                <div class="p-3 border-bottom">
+                    <div class="row text-center">
+                        <div class="col-4 border-end">
+                            <div class="small text-muted text-uppercase">SPF</div>
+                            <div id="spfResult" class="fw-bold fs-5">---</div>
+                        </div>
+                        <div class="col-4 border-end">
+                            <div class="small text-muted text-uppercase">DKIM</div>
+                            <div id="dkimResult" class="fw-bold fs-5">---</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="small text-muted text-uppercase">DMARC</div>
+                            <div id="dmarcResult" class="fw-bold fs-5">---</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-3">
+                    <h6 class="fw-bold mb-1">Subject</h6>
+                    <p id="resSubject" class="mb-3"></p>
+                    
+                    <h6 class="fw-bold mb-1">From</h6>
+                    <p id="resFrom" class="mb-3"></p>
+
+                    <h6 class="fw-bold mb-1">Body (Text Only)</h6>
+                    <pre id="resBody" class="bg-light p-2 rounded border small" style="max-height: 200px; overflow-y: auto;"></pre>
+
+                    <h6 class="fw-bold mb-1">Authentication Results Header</h6>
+                    <pre id="resHeaders" class="bg-dark text-success p-2 rounded border small" style="max-height: 150px; overflow-y: auto;"></pre>
+                </div>
+            </div>
+        </div>
+        
+        <div id="placeholderCard" class="card shadow-sm border-0 bg-light text-center py-5">
+            <div class="card-body text-muted">
+                <i class="fa-solid fa-envelope-open-text fa-4x mb-3 opacity-25"></i>
+                <h5>No Test Active</h5>
+                <p>Generate a unique ID and send an email to see results here.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentTestId = null;
+    let pollInterval = null;
+    let startTime = null;
+
+    function generateId() {
+        return Math.random().toString(36).substring(2, 10).toUpperCase();
+    }
+
+    document.getElementById('startTestBtn').addEventListener('click', function() {
+        currentTestId = generateId();
+        const fullSubject = "MAILDT-TEST: " + currentTestId;
+        document.getElementById('testSubject').value = fullSubject;
+        
+        document.getElementById('startTestBtn').disabled = true;
+        document.getElementById('statusAlert').classList.remove('d-none', 'alert-danger');
+        document.getElementById('statusAlert').classList.add('alert-info');
+        document.getElementById('statusAlert').querySelector('.spinner-border').classList.remove('d-none');
+        document.getElementById('placeholderCard').classList.add('d-none');
+        document.getElementById('resultCard').classList.add('d-none');
+        document.getElementById('statusText').innerText = "Waiting for your email...";
+        
+        startTime = Date.now();
+        updateTimer();
+        
+        // Notify backend to poll faster
+        fetch('/api/mail-tester/start/' + currentTestId, { method: 'POST' });
+
+        // Start polling
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(checkTest, 3000); // Poll every 3 seconds for UI responsiveness
+        
+        showToast('System is now listening for subject: ' + fullSubject, 'Test Started');
+    });
+
+    document.getElementById('copySubjectBtn').addEventListener('click', function() {
+        const text = document.getElementById('testSubject').value;
+        copyToClipboard(text);
+    });
+
+    function updateTimer() {
+        if (!startTime) return;
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        document.getElementById('timer').innerText = elapsed + "s";
+        
+        if (elapsed >= 600) { // 10 minutes
+            stopTest("Timeout: No email received within 10 minutes. Please try again.");
+            return;
+        }
+
+        if (startTime) setTimeout(updateTimer, 1000);
+    }
+
+    function stopTest(message) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        startTime = null;
+        
+        document.getElementById('startTestBtn').disabled = false;
+        const alert = document.getElementById('statusAlert');
+        alert.classList.remove('alert-info');
+        alert.classList.add('alert-danger');
+        document.getElementById('statusText').innerText = message;
+        document.getElementById('timer').innerText = "";
+        
+        // Hide the spinner
+        alert.querySelector('.spinner-border').classList.add('d-none');
+    }
+
+    function checkTest() {
+        if (!currentTestId) return;
+        
+        fetch('/api/mail-tester/check/' + currentTestId)
+            .then(res => res.json())
+            .then(data => {
+                if (data.found) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    startTime = null;
+                    
+                    document.getElementById('statusAlert').classList.add('d-none');
+                    document.getElementById('resultCard').classList.remove('d-none');
+                    document.getElementById('startTestBtn').disabled = false;
+                    
+                    displayResults(data);
+                    showToast('Test email received!', 'Success', 'success');
+                }
+            });
+    }
+
+    function displayResults(data) {
+        document.getElementById('resSubject').innerText = data.subject;
+        document.getElementById('resFrom').innerText = data.sender;
+        document.getElementById('resBody').innerText = data.body;
+        document.getElementById('resHeaders').innerText = data.headers;
+        
+        const setBadge = (id, val) => {
+            const el = document.getElementById(id);
+            el.innerText = val.toUpperCase();
+            el.className = 'fw-bold fs-5';
+            if (val === 'pass') el.classList.add('text-success');
+            else if (val === 'fail') el.classList.add('text-danger');
+            else el.classList.add('text-warning');
+        };
+        
+        setBadge('spfResult', data.spf);
+        setBadge('dkimResult', data.dkim);
+        setBadge('dmarcResult', data.dmarc);
+    }
+</script>
+{% endblock %}

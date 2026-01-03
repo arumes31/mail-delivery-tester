@@ -24,8 +24,20 @@ def get_env_var(name, default=None, var_type=str):
         return None
     return var_type(val)
 
+# Ensure data directory exists for persistence
+if not os.path.exists('data'):
+    os.makedirs('data')
+
+# Construct default Database URL from components
+db_user = get_env_var('DB_USER', 'maildt')
+db_pass = get_env_var('DB_PASS', 'securepassword')
+db_host = get_env_var('DB_HOST', 'db')
+db_port = get_env_var('DB_PORT', '5432')
+db_name = get_env_var('DB_NAME', 'maildt')
+default_db_url = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+
 CONFIG = {
-    'DATABASE_URL': get_env_var('DATABASE_URL', 'sqlite:///maildt.db'), # Fallback to sqlite for local dev without docker
+    'DATABASE_URL': get_env_var('DATABASE_URL', default_db_url), 
     'SMTP_HOST': get_env_var('SMTP_HOST'),
     'SMTP_PORT': get_env_var('SMTP_PORT', 465, int),
     'SMTP_USER': get_env_var('SMTP_USER'),
@@ -84,6 +96,19 @@ class Recipient(Base):
     email_alerts_enabled = Column(Boolean, default=True)
     discord_alerts_enabled = Column(Boolean, default=True)
     alert_active = Column(Boolean, default=False)
+
+class MailTest(Base):
+    __tablename__ = 'mail_tests'
+    id = Column(Integer, primary_key=True)
+    test_id = Column(String(50), unique=True, index=True)
+    received_at = Column(DateTime, default=datetime.datetime.utcnow)
+    subject = Column(String(255))
+    sender = Column(String(120))
+    body = Column(String)
+    headers = Column(String)
+    spf_status = Column(String(50))
+    dkim_status = Column(String(50))
+    dmarc_status = Column(String(50))
 
 Base.metadata.create_all(engine)
 
@@ -328,20 +353,42 @@ def send_probe_email():
     finally:
         session.close()
 
+# --- Global state for fast polling ---
+ACTIVE_TESTS = {} # {test_id: timestamp}
+LAST_IMAP_CHECK = datetime.datetime.min
+
 def check_inbox():
-    """Checks IMAP for returned probe emails."""
+    """Checks IMAP for returned probe emails and active tests."""
+    global LAST_IMAP_CHECK
+    
     if not CONFIG['IMAP_HOST']:
         logger.warning("IMAP not configured. Skipping check.")
         return
 
+    now = datetime.datetime.utcnow()
+    
+    # Cleanup expired tests (older than 10 mins)
+    expired = [tid for tid, ts in ACTIVE_TESTS.items() if (now - ts).total_seconds() > 600]
+    for tid in expired:
+        del ACTIVE_TESTS[tid]
+    
+    has_active_tests = len(ACTIVE_TESTS) > 0
+    
+    # Throttle if no active tests
+    seconds_since_last = (now - LAST_IMAP_CHECK).total_seconds()
+    if not has_active_tests and seconds_since_last < CONFIG['CHECK_INTERVAL']:
+        return
+
+    LAST_IMAP_CHECK = now
     session = Session()
     try:
         mail = imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'])
         mail.login(CONFIG['IMAP_USER'], CONFIG['IMAP_PASS'])
         mail.select("inbox")
 
-        # Search for emails with our subject prefix (all of them, not just unseen, to clean up)
-        status, messages = mail.search(None, '(SUBJECT "MAILDT-PROBE:")')
+        # Search for emails with our subject prefix
+        # We search for both PROBE and TEST
+        status, messages = mail.search(None, '(OR (SUBJECT "MAILDT-PROBE:") (SUBJECT "MAILDT-TEST:"))')
         
         if status != "OK":
             logger.warning("IMAP search failed.")
@@ -359,45 +406,80 @@ def check_inbox():
                         subject = subject.decode(encoding if encoding else "utf-8")
                     
                     if "MAILDT-PROBE:" in subject:
-                        # Extract GUID
                         try:
                             parts = subject.split("MAILDT-PROBE:")
                             if len(parts) > 1:
                                 guid = parts[1].strip()
-                                
                                 # Find in DB
                                 probe = session.query(EmailProbe).filter_by(guid=guid).first()
                                 if probe:
                                     if not probe.received_at:
                                         probe.received_at = datetime.datetime.utcnow()
-                                        
-                                        # Find recipient to check if recovery alert is needed
                                         recipient = session.query(Recipient).filter_by(email=probe.recipient_email).first()
-                                        
                                         if recipient and recipient.alert_active:
-                                            msg = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
-                                            
-                                            if recipient.discord_alerts_enabled:
-                                                logger.info(f"Sending Discord recovery for {probe.recipient_email}")
-                                                send_discord_alert(msg)
-                                            if recipient.email_alerts_enabled:
-                                                send_email_alert(msg)
-                                            
-                                            recipient.alert_active = False # Reset alert state
-                                        
+                                            msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
+                                            if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
+                                            if recipient.email_alerts_enabled: send_email_alert(msg_rec)
+                                            recipient.alert_active = False
                                         probe.status = 'RECEIVED'
                                         session.commit()
-                                        logger.info(f"Received probe {guid}. Latency: {probe.latency}s")
-                                    else:
-                                        logger.info(f"Probe {guid} already marked received.")
-                                else:
-                                    logger.warning(f"Received unknown probe GUID: {guid}")
-                                
-                                # Mark as deleted only if we identified it as a probe
+                                        logger.info(f"Received probe {guid}.")
                                 mail.store(e_id, '+FLAGS', r'\Deleted')
-                                logger.info(f"Deleted email for probe {guid}")
                         except Exception as parse_err:
-                            logger.error(f"Error processing probe email {e_id}: {parse_err}")
+                            logger.error(f"Error processing probe email: {parse_err}")
+
+                    elif "MAILDT-TEST:" in subject:
+                        try:
+                            parts = subject.split("MAILDT-TEST:")
+                            if len(parts) > 1:
+                                test_id = parts[1].strip()
+                                
+                                # Extract headers and body
+                                headers_str = ""
+                                for k, v in msg.items():
+                                    headers_str += f"{k}: {v}\n"
+                                
+                                body = ""
+                                if msg.is_multipart():
+                                    for part in msg.walk():
+                                        if part.get_content_type() == "text/plain":
+                                            body = part.get_payload(decode=True).decode(errors='replace')
+                                            break
+                                else:
+                                    body = msg.get_payload(decode=True).decode(errors='replace')
+
+                                # Basic Auth Results from headers
+                                auth_results = msg.get("Authentication-Results", "")
+                                spf = "unknown"
+                                if "spf=pass" in auth_results.lower(): spf = "pass"
+                                elif "spf=fail" in auth_results.lower(): spf = "fail"
+                                
+                                dkim = "unknown"
+                                if "dkim=pass" in auth_results.lower(): dkim = "pass"
+                                elif "dkim=fail" in auth_results.lower(): dkim = "fail"
+
+                                dmarc = "unknown"
+                                if "dmarc=pass" in auth_results.lower(): dmarc = "pass"
+                                elif "dmarc=fail" in auth_results.lower(): dmarc = "fail"
+
+                                # Save test result
+                                new_test = MailTest(
+                                    test_id=test_id,
+                                    subject=subject,
+                                    sender=msg.get("From"),
+                                    body=body,
+                                    headers=headers_str,
+                                    spf_status=spf,
+                                    dkim_status=dkim,
+                                    dmarc_status=dmarc
+                                )
+                                session.add(new_test)
+                                session.commit()
+                                logger.info(f"Received mail test {test_id}")
+                                
+                                mail.store(e_id, '+FLAGS', r'\Deleted')
+                        except Exception as test_err:
+                            logger.error(f"Error processing test email: {test_err}")
             
         mail.expunge()
         mail.close()
@@ -618,6 +700,48 @@ def settings():
 def recipients_page():
     return render_template('recipients.html')
 
+@app.route('/mail-tester')
+def mail_tester_page():
+    return render_template('mail_tester.html', imap_user=CONFIG['IMAP_USER'])
+
+@app.route('/api/mail-tester/check/<test_id>')
+def api_mail_tester_check(test_id):
+    session = Session()
+    try:
+        test = session.query(MailTest).filter_by(test_id=test_id).first()
+        if test:
+            # Prepare data to return
+            result = {
+                'found': True,
+                'subject': test.subject,
+                'sender': test.sender,
+                'received_at': test.received_at.isoformat(),
+                'spf': test.spf_status,
+                'dkim': test.dkim_status,
+                'dmarc': test.dmarc_status,
+                'headers': test.headers,
+                'body': test.body
+            }
+            
+            # If found, we can remove from active tracking
+            if test_id in ACTIVE_TESTS:
+                del ACTIVE_TESTS[test_id]
+            
+            # Remove from database so it's only "received" once
+            session.delete(test)
+            session.commit()
+            
+            return jsonify(result)
+        return jsonify({'found': False})
+    finally:
+        session.close()
+
+@app.route('/api/mail-tester/start/<test_id>', methods=['POST'])
+def api_mail_tester_start(test_id):
+    ACTIVE_TESTS[test_id] = datetime.datetime.utcnow()
+    logger.info(f"Fast polling enabled for test: {test_id}")
+    return jsonify({'status': 'started'})
+
 @app.route('/api/recipients', methods=['GET', 'POST'])
 @login_required
 def api_recipients():
@@ -798,8 +922,9 @@ if CONFIG['SMTP_HOST']:
     logger.info(f"Scheduler: Added send job every 30s (checking per-recipient schedules)")
 
 if CONFIG['IMAP_HOST']:
-    scheduler.add_job(func=check_inbox, trigger="interval", seconds=CONFIG['CHECK_INTERVAL'])
-    logger.info(f"Scheduler: Added check job every {CONFIG['CHECK_INTERVAL']}s")
+    # We run the job frequently, but the function itself handles throttling if no active tests are running
+    scheduler.add_job(func=check_inbox, trigger="interval", seconds=5)
+    logger.info(f"Scheduler: Added check job (fast-mode enabled when tests are active)")
 
 scheduler.add_job(func=check_delays, trigger="interval", seconds=30) # Check delays every 30s
 scheduler.add_job(func=cleanup_old_probes, trigger="interval", hours=24) # Cleanup daily

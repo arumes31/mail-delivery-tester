@@ -2,3 +2,4 @@ autobuild.sh
 redis-data/dump.rdb
 .dockerignore
 .env
+data/
