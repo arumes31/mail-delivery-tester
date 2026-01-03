@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MailDT - Delivery Monitor</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/logo.svg') }}">
+    <!-- Bootswatch Zephyr Theme -->
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/fontawesome.min.css') }}">
+    <style>
+        .navbar-brand { font-weight: 700; letter-spacing: 1px; display: flex; align-items: center; }
+        .brand-logo { height: 30px; width: 30px; margin-right: 10px; }
+        .table-middle td { vertical-align: middle; }
+        .guid-text { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.85em; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="Logo" class="brand-logo">
+                MailDT
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-chart-line me-1"></i> Dashboard</a></li>
+                    {% if session.logged_in %}
+                    <li class="nav-item"><a class="nav-link" href="/recipients"><i class="fa-solid fa-users me-1"></i> Recipients</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/settings"><i class="fa-solid fa-gears me-1"></i> Settings</a></li>
+                    <li class="nav-item"><a class="nav-link text-warning" href="/logout"><i class="fa-solid fa-right-from-bracket me-1"></i> Logout</a></li>
+                    {% else %}
+                    <li class="nav-item"><a class="nav-link" href="/login"><i class="fa-solid fa-right-to-bracket me-1"></i> Login</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <strong class="me-auto" id="toastTitle">Notification</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="toastBody">
+                Action successful.
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        function showToast(message, title='Notification', type='info') {
+            const toastEl = document.getElementById('liveToast');
+            document.getElementById('toastTitle').innerText = title;
+            document.getElementById('toastBody').innerText = message;
+            
+            // Optional: color coding based on type could be added here
+            
+            const toast = new bootstrap.Toast(toastEl);
+            toast.show();
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard!', 'Success');
+            });
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

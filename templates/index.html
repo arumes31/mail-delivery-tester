@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-0">Live Monitor</h2>
+        <small class="text-muted">Auto-refreshing every 5 seconds</small>
+    </div>
+</div>
+
+<!-- Live Status Card -->
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-light fw-bold text-uppercase small text-muted">
+        <i class="fa-solid fa-satellite-dish me-1"></i> Current Status
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle table-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Recipient</th>
+                        <th>Status</th>
+                        <th>Sent At (UTC)</th>
+                        <th>Latency</th>
+                        <th>Threshold</th>
+                        <th>GUID</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="stats-body">
+                    <!-- Data injected here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- History Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-clock-rotate-left me-2"></i>History: <span id="historyRecipientTitle" class="fw-bold text-primary"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Status</th>
+                                <th>Sent At</th>
+                                <th>Latency</th>
+                                <th>Threshold</th>
+                                <th>GUID</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-history-body">
+                            <!-- History Data -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function getStatusBadge(status) {
+        let color = 'secondary';
+        let icon = 'fa-circle-question';
+        
+        if (status === 'RECEIVED') { color = 'success'; icon = 'fa-circle-check'; }
+        else if (status === 'PENDING') { color = 'warning'; icon = 'fa-hourglass-half'; }
+        else if (status === 'MISSING') { color = 'danger'; icon = 'fa-circle-exclamation'; }
+        else if (status === 'SEND_ERROR') { color = 'dark'; icon = 'fa-circle-xmark'; }
+        
+        return `<span class="badge bg-${color}"><i class="fa-solid ${icon} me-1"></i>${status}</span>`;
+    }
+
+    function updateStats() {
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('stats-body');
+                tbody.innerHTML = '';
+                
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4"><i class="fa-solid fa-inbox fa-2x mb-2"></i><br>No monitoring data available yet.</td></tr>';
+                    return;
+                }
+
+                data.forEach(item => {
+                    let rowClass = '';
+                    if (item.status === 'MISSING' || item.status === 'SEND_ERROR') rowClass = 'table-danger';
+                    else if (item.status === 'RECEIVED') rowClass = 'table-success';
+                    else if (item.status === 'PENDING') rowClass = 'table-warning';
+
+                    const row = `
+                        <tr class="${rowClass}">
+                            <td class="fw-bold">${item.recipient || '-'}</td>
+                            <td>${getStatusBadge(item.status)}</td>
+                            <td>${item.sent_at ? new Date(item.sent_at).toLocaleString() : '-'}</td>
+                            <td>${item.latency}s</td>
+                            <td>${item.alert_threshold || '-'}s</td>
+                            <td>
+                                <span class="guid-text user-select-all" title="${item.guid}">${item.guid}</span>
+                                <button class="btn btn-link btn-sm text-dark p-0 ms-1" onclick="copyToClipboard('${item.guid}')" title="Copy GUID">
+                                    <i class="fa-regular fa-copy"></i>
+                                </button>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-dark" onclick="showHistory('${item.recipient}')">
+                                    <i class="fa-solid fa-list"></i> History
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            })
+            .catch(err => console.error('Error fetching stats:', err));
+    }
+
+    function showHistory(recipient) {
+        document.getElementById('historyRecipientTitle').innerText = recipient;
+        const tbody = document.getElementById('modal-history-body');
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</td></tr>';
+        
+        const modal = new bootstrap.Modal(document.getElementById('historyModal'));
+        modal.show();
+
+        fetch(`/api/history?recipient=${encodeURIComponent(recipient)}`)
+            .then(response => response.json())
+            .then(data => {
+                tbody.innerHTML = '';
+                if (data.length === 0) {
+                     tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3">No history found.</td></tr>';
+                     return;
+                }
+                data.forEach(item => {
+                    const row = `
+                        <tr>
+                            <td>${getStatusBadge(item.status)}</td>
+                            <td>${new Date(item.sent_at).toLocaleString()}</td>
+                            <td>${item.latency}s</td>
+                            <td>${item.alert_threshold || '-'}s</td>
+                            <td>
+                                <span class="guid-text user-select-all">${item.guid}</span>
+                                <button class="btn btn-link btn-sm text-muted p-0 ms-1" onclick="copyToClipboard('${item.guid}')">
+                                    <i class="fa-regular fa-copy"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            });
+    }
+
+    // Initial load and periodic refresh
+    updateStats();
+    setInterval(updateStats, 5000);
+</script>
+{% endblock %}

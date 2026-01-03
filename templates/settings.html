@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Configuration</h2>
+<p>Settings are loaded from Docker environment variables.</p>
+
+<table class="table table-bordered mt-3">
+    <thead class="table-light">
+        <tr>
+            <th>Variable</th>
+            <th>Value</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for key, value in config.items() %}
+        <tr>
+            <td><code>{{ key }}</code></td>
+            <td>{{ value }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

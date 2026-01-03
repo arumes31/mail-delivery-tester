@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-primary text-white text-center">
+                <h4 class="mb-0"><i class="fa-solid fa-lock me-2"></i>Login</h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST" action="/login">
+                    <div class="mb-3">
+                        <label for="username" class="form-label fw-bold">Username</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-user"></i></span>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label fw-bold">Password</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-key"></i></span>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                    </div>
+                    {% if show_totp %}
+                    <div class="mb-3">
+                        <label for="totp" class="form-label fw-bold">TOTP Code</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-shield-halved"></i></span>
+                            <input type="text" class="form-control" id="totp" name="totp" placeholder="123456" autocomplete="one-time-code" required>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if error %}
+                    <div class="alert alert-danger py-2 mb-3" role="alert">
+                        <i class="fa-solid fa-circle-exclamation me-1"></i> {{ error }}
+                    </div>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary w-100">
+                        Sign In <i class="fa-solid fa-arrow-right-to-bracket ms-1"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

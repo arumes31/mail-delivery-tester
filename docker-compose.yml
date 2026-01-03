@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-maildt}
+      POSTGRES_PASSWORD: ${DB_PASS:-securepassword}
+      POSTGRES_DB: ${DB_NAME:-maildt}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - maildt_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maildt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "${PORT:-5000}:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-maildt}:${DB_PASS:-securepassword}@db:5432/${DB_NAME:-maildt}
+      # Mail Configuration
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - IMAP_HOST=${IMAP_HOST}
+      - IMAP_PORT=${IMAP_PORT:-993}
+      - IMAP_USER=${IMAP_USER}
+      - IMAP_PASS=${IMAP_PASS}
+      # App Logic
+      - SEND_INTERVAL=${SEND_INTERVAL:-3600} # Seconds between emails
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-30} # Seconds between IMAP checks
+      - ALERT_THRESHOLD=${ALERT_THRESHOLD:-300} # Seconds before marking as delayed
+      # Alerting
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - ALERT_MAIL_RECIPIENT=${ALERT_MAIL_RECIPIENT} # Separate mail for alerts
+      # Authentication
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - ADMIN_TOTP_SECRET=${ADMIN_TOTP_SECRET}
+      # Proxy Configuration
+      - ENABLE_PROXY=${ENABLE_PROXY:-false}
+    networks:
+      - maildt_net
+    restart: unless-stopped
+
+volumes:
+  db_data:
+
+networks:
+  maildt_net:
