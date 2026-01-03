@@ -721,7 +721,7 @@ def settings():
 @app.route('/recipients')
 @login_required
 def recipients_page():
-    return render_template('recipients.html')
+    return render_template('recipients.html', imap_user=CONFIG['IMAP_USER'])
 
 @app.route('/mail-tester')
 def mail_tester_page():
