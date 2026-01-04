@@ -441,6 +441,7 @@ ACTIVE_TESTS = {} # {test_id: timestamp}
 IP_RATE_LIMITS = {} # {ip: [timestamps]}
 LOGIN_ATTEMPTS = {} # {ip: [timestamps]}
 BLACKLIST_ATTEMPTS = {} # {ip: [timestamps]}
+DECODE_SPAM_ATTEMPTS = {} # {ip: [timestamps]}
 LAST_IMAP_CHECK = datetime.datetime.min
 
 # Cache for stats overview
@@ -979,6 +980,28 @@ def decode_spam_page():
 
 @app.route('/api/decode-spam', methods=['POST'])
 def api_decode_spam():
+    # Rate Limiting: 5 per minute per IP
+    now = time.time()
+    ip_addr = request.remote_addr
+    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
+        ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+
+    if ip_addr not in DECODE_SPAM_ATTEMPTS:
+        DECODE_SPAM_ATTEMPTS[ip_addr] = []
+    
+    DECODE_SPAM_ATTEMPTS[ip_addr] = [t for t in DECODE_SPAM_ATTEMPTS[ip_addr] if now - t < 60]
+    
+    if len(DECODE_SPAM_ATTEMPTS[ip_addr]) >= 5:
+        retry_after = int(60 - (now - DECODE_SPAM_ATTEMPTS[ip_addr][0]))
+        return jsonify({
+            'error': 'Rate limit exceeded', 
+            'message': f'Please wait {retry_after} seconds before running another analysis.',
+            'retry_after': retry_after
+        }), 429
+    
+    DECODE_SPAM_ATTEMPTS[ip_addr].append(now)
+    remaining = 5 - len(DECODE_SPAM_ATTEMPTS[ip_addr])
+
     raw_headers = request.json.get('headers', '').strip()
     if not raw_headers:
         return jsonify({'error': 'No headers provided'}), 400
@@ -1020,7 +1043,7 @@ def api_decode_spam():
                     'value': data.get('value', ''),
                     'analysis': data.get('analysis', '')
                 })
-            return jsonify({'report': report})
+            return jsonify({'report': report, 'remaining_quota': remaining})
         except json.JSONDecodeError:
             return jsonify({'error': 'Failed to parse decoder output as JSON', 'raw': result.stdout}), 500
 
