@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import uuid
 import smtplib
@@ -13,6 +14,8 @@ import json
 import dns.resolver
 import socket
 import time
+import subprocess
+import tempfile
 from spam_decoder import decode_spam_headers
 from functools import wraps
 from email.mime.text import MIMEText
@@ -970,6 +973,62 @@ def smtp_test_page():
 def blacklist_check_page():
     return render_template('blacklist_check.html')
 
+@app.route('/decode-spam')
+def decode_spam_page():
+    return render_template('decode_spam.html')
+
+@app.route('/api/decode-spam', methods=['POST'])
+def api_decode_spam():
+    raw_headers = request.json.get('headers', '').strip()
+    if not raw_headers:
+        return jsonify({'error': 'No headers provided'}), 400
+
+    # Record usage
+    record_usage('decode-spam')
+
+    try:
+        # 1. Create a temporary file for the headers
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp:
+            tmp.write(raw_headers)
+            tmp_path = tmp.name
+
+        # 2. Run the wrapper script via subprocess
+        # The wrapper patches a bug in the mgeeky script that causes crashes on certain headers
+        cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', '-r', tmp_path]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        # 3. Clean up temp file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        if result.returncode != 0:
+            # Try to see if it's because of missing dependencies or actual script error
+            error_msg = result.stderr if result.stderr else "Script execution failed"
+            return jsonify({'error': f'Decoder error: {error_msg}'}), 500
+
+        # 4. Parse JSON output
+        try:
+            decoded_data = json.loads(result.stdout)
+            # The script returns a dictionary of tests. We convert it to a list for easier frontend rendering
+            report = []
+            for test_name, data in decoded_data.items():
+                report.append({
+                    'name': test_name,
+                    'header': data.get('header', ''),
+                    'description': data.get('description', ''),
+                    'value': data.get('value', ''),
+                    'analysis': data.get('analysis', '')
+                })
+            return jsonify({'report': report})
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Failed to parse decoder output as JSON', 'raw': result.stdout}), 500
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Decoding timed out (30s)'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/whois')
 def whois_page():
     if not CONFIG['ENABLE_WHOIS']:
@@ -1430,7 +1489,7 @@ def api_stats_overview():
             if since:
                 # Use MetricEvent for time-windowed stats
                 counts = {}
-                types = ['sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist', 'send_failure', 'alert_sent', 'spf_fail', 'dkim_fail', 'dmarc_fail']
+                types = ['sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist', 'decode-spam', 'send_failure', 'alert_sent', 'spf_fail', 'dkim_fail', 'dmarc_fail']
                 for t in types:
                     key = t.replace('-', '_')
                     counts[key] = session_db.query(MetricEvent).filter(
@@ -1461,6 +1520,7 @@ def api_stats_overview():
                     'mail_tester': get_global('mail-tester'),
                     'smtp_diag': get_global('smtp-diag'),
                     'blacklist': get_global('blacklist'),
+                    'decode_spam': get_global('decode-spam'),
                     'send_failure': get_global('send_failure'),
                     'alert_sent': get_global('alert_sent'),
                     'spf_fail': get_global('spf_fail'),

@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h2><i class="fa-solid fa-code me-2"></i>Decode Spam Headers</h2>
+            <p class="text-muted mb-0">Deep analysis of raw email headers using <code class="text-primary fw-bold">mgeeky/decode-spam-headers</code> logic.</p>
+        </div>
+        <a href="/" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-dark text-primary fw-bold">
+                <i class="fa-solid fa-file-import me-2"></i> Paste Raw Headers
+            </div>
+            <div class="card-body">
+                <form id="decodeForm">
+                    <div class="mb-3">
+                        <textarea class="form-control font-monospace small" id="headerInput" rows="10" placeholder="Paste your raw email headers here (Ctrl+A, Ctrl+C from View Source)...")" style="background-color: #120d1d; color: #b0b0b0; border: 1px solid rgba(138, 43, 226, 0.2);"></textarea>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small">
+                            <i class="fa-solid fa-circle-info me-1"></i> Full analysis may take up to 30 seconds if DNS resolution is required.
+                        </div>
+                        <button type="submit" id="decodeBtn" class="btn btn-primary px-5 py-2 fw-bold">
+                            <i class="fa-solid fa-wand-magic-sparkles me-2"></i> Analyze Headers
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="resultsWrapper" style="display: none;">
+    <div class="row" id="report-container">
+        <!-- Results injected here -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('decodeForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const headers = document.getElementById('headerInput').value.trim();
+        if (!headers) {
+            showToast('Please paste some headers first.', 'Empty Input', 'warning');
+            return;
+        }
+        runDecoder(headers);
+    });
+
+    function runDecoder(headers) {
+        const btn = document.getElementById('decodeBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Deconstructing...';
+        
+        document.getElementById('resultsWrapper').style.display = 'block';
+        const container = document.getElementById('report-container');
+        container.innerHTML = `
+            <div class="col-12 text-center py-5">
+                <div class="spinner-grow text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                <h5>Performing Deep Protocol Analysis...</h5>
+                <p class="text-muted small">The mgeeky engine is parsing 67+ header types.</p>
+            </div>
+        `;
+
+        fetch('/api/decode-spam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ headers: headers })
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-2"></i> Analyze Again';
+            
+            if (data.error) {
+                showToast(data.error, 'Decoder Error', 'danger');
+                container.innerHTML = `<div class="col-12 text-center text-danger py-3"><strong>Error:</strong> ${data.error}</div>`;
+                return;
+            }
+
+            renderReport(data.report);
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles me-2"></i> Analyze Headers';
+            showToast('Request failed. Please try again.', 'Error', 'danger');
+        });
+    }
+
+    function renderReport(report) {
+        const container = document.getElementById('report-container');
+        container.innerHTML = '';
+        
+        if (!report || report.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center py-5 text-muted">No significant anti-spam headers were detected in the input.</div>';
+            return;
+        }
+
+        report.forEach((item, index) => {
+            const col = document.createElement('div');
+            col.className = 'col-md-6 mb-4';
+            
+            // Clean up analysis text (it often has ANSI codes or special markers from the script)
+            // The script uses __COLOR_XX__|text|__END_COLOR__ for its own HTML rendering logic
+            // but we'll try to convert it or strip it.
+            let analysisHtml = item.analysis.replace(/\n/g, '<br>');
+            
+            // Basic conversion of the script's internal markers to high-visibility badges
+            // Red (31) -> Error/Danger
+            analysisHtml = analysisHtml.replace(/__COLOR_31__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-danger shadow-sm border border-danger fw-bold px-2 py-1">$1</span>');
+            // Green (32) -> Success/OK
+            analysisHtml = analysisHtml.replace(/__COLOR_32__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-success shadow-sm border border-success fw-bold px-2 py-1">$1</span>');
+            // Yellow (33) -> Warning
+            analysisHtml = analysisHtml.replace(/__COLOR_33__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-warning text-dark shadow-sm border border-warning fw-bold px-2 py-1">$1</span>');
+            // Cyan/Blue (36/34) -> Info
+            analysisHtml = analysisHtml.replace(/__COLOR_36__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-info text-dark shadow-sm border border-info fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_34__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-primary shadow-sm border border-primary fw-bold px-2 py-1">$1</span>');
+            
+            // Catch-all for other colors
+            analysisHtml = analysisHtml.replace(/__COLOR_\d+__\|(.*?)\|__END_COLOR__/g, '<strong class="text-white">$1</strong>');
+
+            col.innerHTML = `
+                <div class="card h-100 shadow-sm border-0">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-bold"><i class="fa-solid fa-microscope me-2 opacity-50"></i> ${item.name}</span>
+                        <span class="small opacity-50 font-monospace" style="font-size: 0.7rem;">#${index+1}</span>
+                    </div>
+                    <div class="card-body">
+                        ${item.header ? `<div class="mb-2 small text-primary fw-bold text-uppercase" style="font-size: 0.65rem;">Header: ${item.header}</div>` : ''}
+                        ${item.description ? `<p class="small text-muted italic mb-3">${item.description}</p>` : ''}
+                        
+                        <div class="bg-dark p-3 rounded border border-secondary mb-3">
+                            <div class="small text-muted mb-1 fw-bold text-uppercase" style="font-size: 0.6rem;">Value:</div>
+                            <div class="font-monospace small text-white-50 overflow-auto" style="max-height: 100px;">${item.value}</div>
+                        </div>
+
+                        <div class="analysis-box">
+                            <div class="small text-muted mb-1 fw-bold text-uppercase" style="font-size: 0.6rem;">Engine Analysis:</div>
+                            <div class="text-white small" style="line-height: 1.6;">${analysisHtml}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(col);
+        });
+    }
+</script>
+{% endblock %}

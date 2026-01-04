@@ -110,14 +110,19 @@
                             <div id="stat-d-sd" class="small text-center text-primary fw-bold">0</div>
                             <div id="stat-a-sd" class="small text-center text-primary fw-bold">0</div>
 
-                            <!-- Blacklist -->
-                            <div class="small fw-bold text-white-50" style="white-space: nowrap;">Blacklist</div>
-                            <div id="stat-h-bl" class="small text-center text-primary fw-bold">0</div>
-                            <div id="stat-d-bl" class="small text-center text-primary fw-bold">0</div>
-                            <div id="stat-a-bl" class="small text-center text-primary fw-bold">0</div>
-
-                            <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
-
+                                                    <!-- Blacklist -->
+                                                    <div class="small fw-bold text-white-50" style="white-space: nowrap;">Blacklist</div>
+                                                    <div id="stat-h-bl" class="small text-center text-primary fw-bold">0</div>
+                                                    <div id="stat-d-bl" class="small text-center text-primary fw-bold">0</div>
+                                                    <div id="stat-a-bl" class="small text-center text-primary fw-bold">0</div>
+                            
+                                                    <!-- Decode Spam -->
+                                                    <div class="small fw-bold text-white-50" style="white-space: nowrap;">Decode Spam</div>
+                                                    <div id="stat-h-ds" class="small text-center text-primary fw-bold">0</div>
+                                                    <div id="stat-d-ds" class="small text-center text-primary fw-bold">0</div>
+                                                    <div id="stat-a-ds" class="small text-center text-primary fw-bold">0</div>
+                            
+                                                    <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
                             <!-- Alerts -->
                             <div class="small fw-bold text-white-50">Alerts</div>
                             <div id="stat-h-al" class="small text-center text-danger fw-bold">0</div>
@@ -232,6 +237,7 @@
                     document.getElementById(`stat-${prefix}-mt`).innerText = d.mail_tester;
                     document.getElementById(`stat-${prefix}-sd`).innerText = d.smtp_diag;
                     document.getElementById(`stat-${prefix}-bl`).innerText = d.blacklist;
+                    document.getElementById(`stat-${prefix}-ds`).innerText = d.decode_spam;
                     
                     document.getElementById(`stat-${prefix}-al`).innerText = d.alert_sent;
                     document.getElementById(`stat-${prefix}-fl`).innerText = d.send_failure;

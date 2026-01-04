@@ -18,6 +18,7 @@ MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify
 - **🧪 Mail Tester**: Diagnostic tool (similar to mail-tester.com) to manually verify SPF, DKIM, DMARC, and detailed spam headers (O365, Mimecast, Proofpoint, etc.).
 - **🩺 SMTP Diagnostics**: Public protocol analyzer with session transcripts, banner checks, TLS verification, and open relay testing.
 - **🛡️ Blacklist Check**: Deep DNSBL analysis for domains and their MX nodes against 15+ major providers.
+- **🔍 Decode Spam Headers**: Integrated official engine for analyzing 67+ raw email header types.
 - **🔍 WHOIS Lookup**: Embedded integration for external domain and IP information.
 - **🌐 Web-Check**: Integrated OSINT tool for comprehensive website analysis.
 - **Multi-Recipient Support**: Monitor multiple target mailboxes simultaneously with individual schedules.
@@ -63,6 +64,8 @@ Access the dashboard at `http://localhost:5000`. Persistent data will be stored 
 - **Mail Tester**: Public manual verification of mail headers and spam scores.
 - **SMTP Diagnostics**: Public deep protocol analysis and session transcripts.
 - **Blacklist Check**: Public reputation scanning for domains and IPs.
+- **Decode Spam Headers**: Deep analysis of raw email headers.
+- **WHOIS Lookup**: Public embedded WHOIS information service.
 - **Web-Check**: Public embedded website analysis tool.
 - **System Diagnostics**: (Admin) Internal health check of your configured SMTP/IMAP credentials.
 - **Recipients**: (Admin) Manage target addresses and alert thresholds.
