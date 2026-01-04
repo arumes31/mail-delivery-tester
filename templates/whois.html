@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row">
+<div class="row" id="whoisHeader">
     <div class="col-md-12 mb-4 d-flex justify-content-between align-items-center">
         <div>
             <h2><i class="fa-solid fa-search me-2"></i>WHOIS Lookup</h2>
@@ -15,9 +15,66 @@
 
 <div class="row">
     <div class="col-md-12">
-        <div class="card shadow-lg border-0" style="height: 80vh; overflow: hidden; background: #fff;">
-            <iframe src="https://whois.reitetschlaeger.com" style="width: 100%; height: 100%; border: none;" title="WHOIS Lookup"></iframe>
+        <!-- Permission Prompt -->
+        <div id="permissionPrompt" class="card shadow-lg border-primary mx-auto" style="max-width: 600px; display: none;">
+            <div class="card-body p-5 text-center">
+                <i class="fa-solid fa-user-shield fa-4x text-primary mb-4 opacity-75"></i>
+                <h4 class="text-white fw-bold mb-3">External Content Permission</h4>
+                <p class="text-muted mb-4">
+                    To use the WHOIS lookup service, we need to load an external website: <br>
+                    <code class="text-primary fw-bold">whois.reitetschlaeger.com</code>
+                </p>
+                <div class="form-check d-inline-block mb-4 text-start">
+                    <input class="form-check-input" type="checkbox" id="rememberChoice">
+                    <label class="form-check-label text-white-50 small" for="rememberChoice">
+                        Remember my choice for future visits
+                    </label>
+                </div>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary btn-lg" onclick="grantPermission()">
+                        <i class="fa-solid fa-check-circle me-2"></i> Allow & Load Service
+                    </button>
+                    <a href="/" class="btn btn-link text-muted small">Cancel and Return</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- WHOIS Frame Container -->
+        <div id="whoisContainer" class="card shadow-lg border-0" style="height: 88vh; overflow: hidden; background: #fff; display: none;">
+            <iframe id="whoisFrame" src="" style="width: 100%; height: 100%; border: none;" title="WHOIS Lookup"></iframe>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const STORAGE_KEY = 'whois_permission_granted';
+
+    document.addEventListener('DOMContentLoaded', function() {
+        if (localStorage.getItem(STORAGE_KEY) === 'true') {
+            loadWhois();
+        } else {
+            document.getElementById('permissionPrompt').style.display = 'block';
+        }
+    });
+
+    function grantPermission() {
+        if (document.getElementById('rememberChoice').checked) {
+            localStorage.setItem(STORAGE_KEY, 'true');
+        }
+        loadWhois();
+    }
+
+    function loadWhois() {
+        document.getElementById('permissionPrompt').style.display = 'none';
+        document.getElementById('whoisHeader').style.display = 'none';
+        
+        const container = document.getElementById('whoisContainer');
+        const frame = document.getElementById('whoisFrame');
+        
+        frame.src = "https://whois.reitetschlaeger.com";
+        container.style.display = 'block';
+    }
+</script>
 {% endblock %}
