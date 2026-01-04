@@ -1,132 +1,151 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row">
-    <div class="col-lg-9 mb-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h2 class="mb-0">Live Monitor</h2>
-                <small class="text-muted">Auto-refreshing every 5 seconds</small>
+<div class="blur-container">
+    {% if not session.logged_in %}
+    <div class="login-overlay">
+        <div class="overlay-card shadow-lg">
+            <div class="mb-4">
+                <i class="fa-solid fa-lock fa-3x text-primary mb-3"></i>
+                <h3 class="text-white fw-bold">Private Monitor</h3>
+                <p class="text-muted small">Access to the live delivery monitor is restricted. Please sign in to view real-time logs and detailed statistics.</p>
             </div>
-        </div>
-
-        <!-- Live Status Card -->
-        <div class="card shadow-sm border-0">
-            <div class="card-header fw-bold text-uppercase small text-muted">
-                <i class="fa-solid fa-satellite-dish me-1"></i> Current Status
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0 align-middle table-middle">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Recipient</th>
-                                <th>Status</th>
-                                <th>Sent At (UTC)</th>
-                                <th>RTT <small class="text-muted">(Latency/Max)</small></th>
-                                <th>SPF</th>
-                                <th>DKIM</th>
-                                <th>DMARC</th>
-                                <th class="text-end">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="stats-body">
-                            <!-- Data injected here -->
-                        </tbody>
-                    </table>
-                </div>
+            <div class="d-grid">
+                <a href="/login?next=/" class="btn btn-primary btn-lg shadow-sm">
+                    <i class="fa-solid fa-right-to-bracket me-2"></i> Login to View
+                </a>
             </div>
         </div>
     </div>
+    {% endif %}
 
-    <!-- Sidebar Widget -->
-    <div class="col-lg-3">
-        <div class="sticky-top" style="top: 90px; z-index: 10;">
-            <div class="card shadow-lg border-0 mb-4">
-                <div class="card-header fw-bold small text-uppercase">
-                    <i class="fa-solid fa-chart-pie me-2 text-primary"></i> Analytics Overview
+    <div class="row {% if not session.logged_in %}blur-content{% endif %}">
+        <div class="col-lg-9 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="mb-0">Live Monitor</h2>
+                    <small class="text-muted">Auto-refreshing every 5 seconds</small>
+                </div>
+            </div>
+
+            <!-- Live Status Card -->
+            <div class="card shadow-sm border-0">
+                <div class="card-header fw-bold text-uppercase small text-muted">
+                    <i class="fa-solid fa-satellite-dish me-1"></i> Current Status
                 </div>
                 <div class="card-body p-0">
-                    <div id="stats-overview" class="d-grid gap-x-3 gap-y-2 py-3 px-3" style="grid-template-columns: 1fr minmax(45px, auto) minmax(45px, auto) minmax(55px, auto); white-space: nowrap;">
-                        <!-- Header -->
-                        <div class="small text-muted fw-bold" style="font-size: 0.6rem;">METRIC</div>
-                        <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">1H</div>
-                        <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">24H</div>
-                        <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">ALL</div>
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 align-middle table-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Recipient</th>
+                                    <th>Status</th>
+                                    <th>Sent At (UTC)</th>
+                                    <th>RTT <small class="text-muted">(Latency/Max)</small></th>
+                                    <th>SPF</th>
+                                    <th>DKIM</th>
+                                    <th>DMARC</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stats-body">
+                                <!-- Data injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-                        <!-- Mail Sent -->
-                        <div class="small fw-bold text-white-50">Mail Sent</div>
-                        <div id="stat-h-sent" class="small text-center text-white fw-bold">0</div>
-                        <div id="stat-d-sent" class="small text-center text-white fw-bold">0</div>
-                        <div id="stat-a-sent" class="small text-center text-white fw-bold">0</div>
+        <!-- Sidebar Widget -->
+        <div class="col-lg-3">
+            <div class="sticky-top" style="top: 90px; z-index: 10;">
+                <div class="card shadow-lg border-0 mb-4">
+                    <div class="card-header fw-bold small text-uppercase">
+                        <i class="fa-solid fa-chart-pie me-2 text-primary"></i> Analytics Overview
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="stats-overview" class="d-grid gap-x-3 gap-y-2 py-3 px-3" style="grid-template-columns: 1fr minmax(45px, auto) minmax(45px, auto) minmax(55px, auto); white-space: nowrap;">
+                            <!-- Header -->
+                            <div class="small text-muted fw-bold" style="font-size: 0.6rem;">METRIC</div>
+                            <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">1H</div>
+                            <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">24H</div>
+                            <div class="small text-muted fw-bold text-center" style="font-size: 0.6rem;">ALL</div>
 
-                        <!-- Mail Recv -->
-                        <div class="small fw-bold text-white-50">Mail Recv</div>
-                        <div id="stat-h-recv" class="small text-center text-success fw-bold">0</div>
-                        <div id="stat-d-recv" class="small text-center text-success fw-bold">0</div>
-                        <div id="stat-a-recv" class="small text-center text-success fw-bold">0</div>
+                            <!-- Mail Sent -->
+                            <div class="small fw-bold text-white-50">Mail Sent</div>
+                            <div id="stat-h-sent" class="small text-center text-white fw-bold">0</div>
+                            <div id="stat-d-sent" class="small text-center text-white fw-bold">0</div>
+                            <div id="stat-a-sent" class="small text-center text-white fw-bold">0</div>
 
-                        <!-- Success Rate -->
-                        <div class="small fw-bold text-white-50">Success</div>
-                        <div id="stat-h-sr" class="small text-center text-info fw-bold">0%</div>
-                        <div id="stat-d-sr" class="small text-center text-info fw-bold">0%</div>
-                        <div id="stat-a-sr" class="small text-center text-info fw-bold">0%</div>
+                            <!-- Mail Recv -->
+                            <div class="small fw-bold text-white-50">Mail Recv</div>
+                            <div id="stat-h-recv" class="small text-center text-success fw-bold">0</div>
+                            <div id="stat-d-recv" class="small text-center text-success fw-bold">0</div>
+                            <div id="stat-a-recv" class="small text-center text-success fw-bold">0</div>
 
-                        <!-- Avg RTT -->
-                        <div class="small fw-bold text-white-50">Avg RTT</div>
-                        <div id="stat-h-rtt" class="small text-center text-warning fw-bold">0s</div>
-                        <div id="stat-d-rtt" class="small text-center text-warning fw-bold">0s</div>
-                        <div class="small text-center text-muted">-</div>
+                            <!-- Success Rate -->
+                            <div class="small fw-bold text-white-50">Success</div>
+                            <div id="stat-h-sr" class="small text-center text-info fw-bold">0%</div>
+                            <div id="stat-d-sr" class="small text-center text-info fw-bold">0%</div>
+                            <div id="stat-a-sr" class="small text-center text-info fw-bold">0%</div>
 
-                        <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
+                            <!-- Avg RTT -->
+                            <div class="small fw-bold text-white-50">Avg RTT</div>
+                            <div id="stat-h-rtt" class="small text-center text-warning fw-bold">0s</div>
+                            <div id="stat-d-rtt" class="small text-center text-warning fw-bold">0s</div>
+                            <div class="small text-center text-muted">-</div>
 
-                        <!-- Mail Tester -->
-                        <div class="small fw-bold text-white-50">Mail Tester</div>
-                        <div id="stat-h-mt" class="small text-center text-primary fw-bold">0</div>
-                        <div id="stat-d-mt" class="small text-center text-primary fw-bold">0</div>
-                        <div id="stat-a-mt" class="small text-center text-primary fw-bold">0</div>
+                            <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
 
-                        <!-- SMTP Diag -->
-                        <div class="small fw-bold text-white-50">SMTP Diag</div>
-                        <div id="stat-h-sd" class="small text-center text-primary fw-bold">0</div>
-                        <div id="stat-d-sd" class="small text-center text-primary fw-bold">0</div>
-                        <div id="stat-a-sd" class="small text-center text-primary fw-bold">0</div>
+                            <!-- Mail Tester -->
+                            <div class="small fw-bold text-white-50" style="white-space: nowrap;">Mail Tester</div>
+                            <div id="stat-h-mt" class="small text-center text-primary fw-bold">0</div>
+                            <div id="stat-d-mt" class="small text-center text-primary fw-bold">0</div>
+                            <div id="stat-a-mt" class="small text-center text-primary fw-bold">0</div>
 
-                        <!-- Blacklist -->
-                        <div class="small fw-bold text-white-50">Blacklist</div>
-                        <div id="stat-h-bl" class="small text-center text-primary fw-bold">0</div>
-                        <div id="stat-d-bl" class="small text-center text-primary fw-bold">0</div>
-                        <div id="stat-a-bl" class="small text-center text-primary fw-bold">0</div>
+                            <!-- SMTP Diag -->
+                            <div class="small fw-bold text-white-50" style="white-space: nowrap;">SMTP Diag</div>
+                            <div id="stat-h-sd" class="small text-center text-primary fw-bold">0</div>
+                            <div id="stat-d-sd" class="small text-center text-primary fw-bold">0</div>
+                            <div id="stat-a-sd" class="small text-center text-primary fw-bold">0</div>
 
-                        <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
+                            <!-- Blacklist -->
+                            <div class="small fw-bold text-white-50" style="white-space: nowrap;">Blacklist</div>
+                            <div id="stat-h-bl" class="small text-center text-primary fw-bold">0</div>
+                            <div id="stat-d-bl" class="small text-center text-primary fw-bold">0</div>
+                            <div id="stat-a-bl" class="small text-center text-primary fw-bold">0</div>
 
-                        <!-- Alerts -->
-                        <div class="small fw-bold text-white-50">Alerts</div>
-                        <div id="stat-h-al" class="small text-center text-danger fw-bold">0</div>
-                        <div id="stat-d-al" class="small text-center text-danger fw-bold">0</div>
-                        <div id="stat-a-al" class="small text-center text-danger fw-bold">0</div>
+                            <div class="grid-divider col-span-4 border-top border-secondary my-1 opacity-25" style="grid-column: span 4;"></div>
 
-                        <!-- Send Failures -->
-                        <div class="small fw-bold text-white-50">Failures</div>
-                        <div id="stat-h-fl" class="small text-center text-danger fw-bold">0</div>
-                        <div id="stat-d-fl" class="small text-center text-danger fw-bold">0</div>
-                        <div id="stat-a-fl" class="small text-center text-danger fw-bold">0</div>
+                            <!-- Alerts -->
+                            <div class="small fw-bold text-white-50">Alerts</div>
+                            <div id="stat-h-al" class="small text-center text-danger fw-bold">0</div>
+                            <div id="stat-d-al" class="small text-center text-danger fw-bold">0</div>
+                            <div id="stat-a-al" class="small text-center text-danger fw-bold">0</div>
 
-                        <!-- Auth Fails -->
-                        <div class="small fw-bold text-white-50">SPF Fail</div>
-                        <div id="stat-h-spf" class="small text-center text-warning fw-bold">0</div>
-                        <div id="stat-d-spf" class="small text-center text-warning fw-bold">0</div>
-                        <div id="stat-a-spf" class="small text-center text-warning fw-bold">0</div>
+                            <!-- Send Failures -->
+                            <div class="small fw-bold text-white-50">Failures</div>
+                            <div id="stat-h-fl" class="small text-center text-danger fw-bold">0</div>
+                            <div id="stat-d-fl" class="small text-center text-danger fw-bold">0</div>
+                            <div id="stat-a-fl" class="small text-center text-danger fw-bold">0</div>
 
-                        <div class="small fw-bold text-white-50">DKIM Fail</div>
-                        <div id="stat-h-dkim" class="small text-center text-warning fw-bold">0</div>
-                        <div id="stat-d-dkim" class="small text-center text-warning fw-bold">0</div>
-                        <div id="stat-a-dkim" class="small text-center text-warning fw-bold">0</div>
+                            <!-- Auth Fails -->
+                            <div class="small fw-bold text-white-50">SPF Fail</div>
+                            <div id="stat-h-spf" class="small text-center text-warning fw-bold">0</div>
+                            <div id="stat-d-spf" class="small text-center text-warning fw-bold">0</div>
+                            <div id="stat-a-spf" class="small text-center text-warning fw-bold">0</div>
 
-                        <div class="small fw-bold text-white-50">DMARC Fail</div>
-                        <div id="stat-h-dmarc" class="small text-center text-warning fw-bold">0</div>
-                        <div id="stat-d-dmarc" class="small text-center text-warning fw-bold">0</div>
-                        <div id="stat-a-dmarc" class="small text-center text-warning fw-bold">0</div>
+                            <div class="small fw-bold text-white-50">DKIM Fail</div>
+                            <div id="stat-h-dkim" class="small text-center text-warning fw-bold">0</div>
+                            <div id="stat-d-dkim" class="small text-center text-warning fw-bold">0</div>
+                            <div id="stat-a-dkim" class="small text-center text-warning fw-bold">0</div>
+
+                            <div class="small fw-bold text-white-50">DMARC Fail</div>
+                            <div id="stat-h-dmarc" class="small text-center text-warning fw-bold">0</div>
+                            <div id="stat-d-dmarc" class="small text-center text-warning fw-bold">0</div>
+                            <div id="stat-a-dmarc" class="small text-center text-warning fw-bold">0</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -173,6 +192,8 @@
 
 {% block scripts %}
 <script>
+    const isLoggedIn = {{ 'true' if session.logged_in else 'false' }};
+
     function getStatusBadge(status) {
         let color = 'secondary';
         let icon = 'fa-circle-question';
@@ -192,6 +213,8 @@
     }
 
     function updateStats() {
+        if (!isLoggedIn) return;
+
         // Fetch Overview Stats
         fetch('/api/stats/overview')
             .then(res => res.json())
