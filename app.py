@@ -966,6 +966,10 @@ def blacklist_check_page():
 def whois_page():
     return render_template('whois.html')
 
+@app.route('/web-check')
+def web_check_page():
+    return render_template('web_check.html')
+
 @app.route('/api/diagnostics/blacklist')
 def api_blacklist_check():
     # Rate Limiting: 5 per minute per IP
