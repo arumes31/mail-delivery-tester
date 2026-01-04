@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h2><i class="fa-solid fa-search me-2"></i>WHOIS Lookup</h2>
+            <p class="text-muted mb-0">External domain and IP information service.</p>
+        </div>
+        <a href="/" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card shadow-lg border-0" style="height: 80vh; overflow: hidden; background: #fff;">
+            <iframe src="https://whois.reitetschlaeger.com" style="width: 100%; height: 100%; border: none;" title="WHOIS Lookup"></iframe>
+        </div>
+    </div>
+</div>
+{% endblock %}

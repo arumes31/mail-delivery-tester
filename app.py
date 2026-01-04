@@ -962,6 +962,10 @@ def smtp_test_page():
 def blacklist_check_page():
     return render_template('blacklist_check.html')
 
+@app.route('/whois')
+def whois_page():
+    return render_template('whois.html')
+
 @app.route('/api/diagnostics/blacklist')
 def api_blacklist_check():
     # Rate Limiting: 5 per minute per IP
