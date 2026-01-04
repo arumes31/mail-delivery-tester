@@ -51,6 +51,11 @@ services:
       - ADMIN_TOTP_SECRET=${ADMIN_TOTP_SECRET}
       # Proxy Configuration
       - ENABLE_PROXY=${ENABLE_PROXY:-true}
+      # External Tools
+      - ENABLE_WHOIS=${ENABLE_WHOIS:-true}
+      - WHOIS_URL=${WHOIS_URL:-https://whois.reitetschlaeger.com}
+      - ENABLE_WEBCHECK=${ENABLE_WEBCHECK:-true}
+      - WEBCHECK_URL=${WEBCHECK_URL:-https://webcheck-512351112734521.reitetschlaeger.com/}
     networks:
       - maildt_net
     restart: unless-stopped

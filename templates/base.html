@@ -176,8 +176,12 @@
                     <li class="nav-item"><a class="nav-link" href="/mail-tester"><i class="fa-solid fa-flask me-1 text-primary"></i> Mail Tester</a></li>
                     <li class="nav-item"><a class="nav-link" href="/smtp-test"><i class="fa-solid fa-envelope-circle-check me-1 text-primary"></i> SMTP Diagnostics</a></li>
                     <li class="nav-item"><a class="nav-link" href="/blacklist-check"><i class="fa-solid fa-list-check me-1 text-primary"></i> Blacklist Check</a></li>
+                    {% if config.ENABLE_WHOIS %}
                     <li class="nav-item"><a class="nav-link" href="/whois"><i class="fa-solid fa-search me-1 text-primary"></i> WHOIS</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/web-check"><i class="fa-solid fa-globe me-1 text-primary"></i> Web-Check</a></li>
+                    {% endif %}
+                    {% if config.ENABLE_WEBCHECK %}
+                    <li class="nav-item"><a class="nav-link" href="/web-check"><i class="fa-solid fa-globe me-1 text-primary"></i> Web Check</a></li>
+                    {% endif %}
                     {% if session.logged_in %}
                     <li class="nav-item"><a class="nav-link" href="/recipients"><i class="fa-solid fa-users me-1 text-primary"></i> Recipients</a></li>
                     <li class="nav-item"><a class="nav-link" href="/settings"><i class="fa-solid fa-gears me-1 text-primary"></i> Settings</a></li>

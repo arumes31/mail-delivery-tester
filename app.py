@@ -61,6 +61,10 @@ CONFIG = {
     'ADMIN_PASSWORD': get_env_var('ADMIN_PASSWORD', 'admin'),
     'ADMIN_TOTP_SECRET': get_env_var('ADMIN_TOTP_SECRET'),
     'ENABLE_PROXY': get_env_var('ENABLE_PROXY', 'false').lower() == 'true',
+    'ENABLE_WHOIS': get_env_var('ENABLE_WHOIS', 'true').lower() == 'true',
+    'WHOIS_URL': get_env_var('WHOIS_URL', 'https://whois.reitetschlaeger.com'),
+    'ENABLE_WEBCHECK': get_env_var('ENABLE_WEBCHECK', 'true').lower() == 'true',
+    'WEBCHECK_URL': get_env_var('WEBCHECK_URL', 'https://webcheck-512351112734521.reitetschlaeger.com/'),
 }
 
 # --- Setup Logging ---
@@ -733,6 +737,10 @@ def check_delays():
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'maildt-default-secret-key-change-me')
 
+@app.context_processor
+def inject_config():
+    return dict(config=CONFIG)
+
 # Apply ProxyFix middleware if enabled
 if CONFIG['ENABLE_PROXY']:
     app.wsgi_app = ProxyFix(
@@ -964,11 +972,15 @@ def blacklist_check_page():
 
 @app.route('/whois')
 def whois_page():
-    return render_template('whois.html')
+    if not CONFIG['ENABLE_WHOIS']:
+        return redirect(url_for('index'))
+    return render_template('whois.html', whois_url=CONFIG['WHOIS_URL'])
 
 @app.route('/web-check')
 def web_check_page():
-    return render_template('web_check.html')
+    if not CONFIG['ENABLE_WEBCHECK']:
+        return redirect(url_for('index'))
+    return render_template('web_check.html', webcheck_url=CONFIG['WEBCHECK_URL'])
 
 @app.route('/api/diagnostics/blacklist')
 def api_blacklist_check():
