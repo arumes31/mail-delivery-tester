@@ -20,7 +20,7 @@ from spam_decoder import decode_spam_headers
 from functools import wraps
 from email.mime.text import MIMEText
 from email.header import decode_header
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, desc
 from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
@@ -36,6 +36,10 @@ def get_env_var(name, default=None, var_type=str):
 # Ensure data directory exists for persistence
 if not os.path.exists('data'):
     os.makedirs('data')
+
+UPLOAD_FOLDER = os.path.join('data', 'custom_icons')
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 # Construct default Database URL from components
 db_user = get_env_var('DB_USER', 'maildt')
@@ -146,6 +150,17 @@ class GlobalCounter(Base):
     counter_name = Column(String(50), unique=True)
     count = Column(Integer, default=0)
 
+class CustomWidget(Base):
+    __tablename__ = 'custom_widgets'
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False)
+    url = Column(String(255), nullable=False)
+    icon = Column(String(50), default='fa-link') # FontAwesome class
+    image_path = Column(String(255), nullable=True) # Path to uploaded image
+    is_private = Column(Boolean, default=False)
+    color = Column(String(20), default='#8a2be2')
+    order = Column(Integer, default=0)
+
 Base.metadata.create_all(engine)
 
 # --- Migration Helpers ---
@@ -205,6 +220,22 @@ def run_migrations():
             session.execute(text("ALTER TABLE recipients ADD COLUMN discord_alerts_enabled BOOLEAN DEFAULT TRUE"))
             session.commit()
 
+        try:
+            session.execute(text("SELECT image_path FROM custom_widgets LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding image_path to custom_widgets")
+            session.execute(text("ALTER TABLE custom_widgets ADD COLUMN image_path VARCHAR(255)"))
+            session.commit()
+
+        try:
+            session.execute(text("SELECT is_private FROM custom_widgets LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding is_private to custom_widgets")
+            session.execute(text("ALTER TABLE custom_widgets ADD COLUMN is_private BOOLEAN DEFAULT FALSE"))
+            session.commit()
+
         # Alert Active state tracking
         try:
             session.execute(text("SELECT alert_active FROM recipients LIMIT 1"))
@@ -233,6 +264,9 @@ def reset_alert_states():
         session_db.rollback()
     finally:
         session_db.close()
+
+run_migrations()
+reset_alert_states()
 
 def record_usage(tool_name):
     """Records a tool usage event in the database."""
@@ -818,6 +852,30 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/')
+def home_page():
+    session_db = Session()
+    is_logged_in = 'logged_in' in session
+    try:
+        query = session_db.query(CustomWidget)
+        if not is_logged_in:
+            query = query.filter(CustomWidget.is_private == False)
+        
+        custom_widgets = query.order_by(CustomWidget.order).all()
+        widgets_data = [{
+            'id': w.id,
+            'title': w.title,
+            'url': w.url,
+            'icon': w.icon,
+            'image_path': w.image_path,
+            'is_private': w.is_private,
+            'color': w.color,
+            'order': w.order
+        } for w in custom_widgets]
+        return render_template('home.html', custom_widgets=widgets_data)
+    finally:
+        session_db.close()
+
+@app.route('/dashboard')
 def index():
     return render_template('index.html')
 
@@ -1474,6 +1532,99 @@ def update_recipient(r_id):
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
+
+@app.route('/api/widgets', methods=['GET', 'POST'])
+@login_required
+def api_widgets():
+    session_db = Session()
+    try:
+        if request.method == 'GET':
+            widgets = session_db.query(CustomWidget).order_by(CustomWidget.order).all()
+            return jsonify([{
+                'id': w.id, 'title': w.title, 'url': w.url, 'icon': w.icon, 'image_path': w.image_path, 'color': w.color, 'order': w.order
+            } for w in widgets])
+        
+        elif request.method == 'POST':
+            # Handle multipart form data
+            title = request.form.get('title')
+            url = request.form.get('url')
+            icon = request.form.get('icon', 'fa-link')
+            color = request.form.get('color', '#8a2be2')
+            is_private = request.form.get('is_private', 'false').lower() == 'true'
+            
+            if not title or not url:
+                return jsonify({'error': 'Title and URL required'}), 400
+
+            image_path = None
+            if 'icon_file' in request.files:
+                file = request.files['icon_file']
+                if file and file.filename:
+                    filename = f"{uuid.uuid4()}_{file.filename}"
+                    file.save(os.path.join(UPLOAD_FOLDER, filename))
+                    image_path = f"/custom_icons/{filename}"
+
+            new_w = CustomWidget(
+                title=title,
+                url=url,
+                icon=icon,
+                image_path=image_path,
+                is_private=is_private,
+                color=color,
+                order=0
+            )
+            session_db.add(new_w)
+            session_db.commit()
+            return jsonify({'message': 'Widget added', 'id': new_w.id})
+    finally:
+        session_db.close()
+
+@app.route('/custom_icons/<filename>')
+def serve_custom_icon(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+@app.route('/api/widgets/<int:w_id>', methods=['PUT', 'DELETE'])
+@login_required
+def api_widget_detail(w_id):
+    session_db = Session()
+    try:
+        widget = session_db.get(CustomWidget, w_id)
+        if not widget:
+            return jsonify({'error': 'Not found'}), 404
+        
+        if request.method == 'DELETE':
+            session_db.delete(widget)
+            session_db.commit()
+            return jsonify({'message': 'Deleted'})
+        
+        elif request.method == 'PUT':
+            # Support both JSON and multipart for updates
+            if request.is_json:
+                data = request.json
+                widget.title = data.get('title', widget.title)
+                widget.url = data.get('url', widget.url)
+                widget.icon = data.get('icon', widget.icon)
+                widget.color = data.get('color', widget.color)
+                widget.is_private = data.get('is_private', widget.is_private)
+                widget.order = data.get('order', widget.order)
+            else:
+                widget.title = request.form.get('title', widget.title)
+                widget.url = request.form.get('url', widget.url)
+                widget.icon = request.form.get('icon', widget.icon)
+                widget.color = request.form.get('color', widget.color)
+                if 'is_private' in request.form:
+                    widget.is_private = request.form.get('is_private').lower() == 'true'
+                
+                if 'icon_file' in request.files:
+                    file = request.files['icon_file']
+                    if file and file.filename:
+                        filename = f"{uuid.uuid4()}_{file.filename}"
+                        file.save(os.path.join(UPLOAD_FOLDER, filename))
+                        widget.image_path = f"/custom_icons/{filename}"
+
+            session_db.commit()
+            return jsonify({'message': 'Updated'})
+    finally:
+        session_db.close()
 
 def mask_email(email):
     """Masks an email address for privacy (e.g. d***l@e***.com)."""
