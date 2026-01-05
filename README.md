@@ -57,8 +57,26 @@ cp .env.example .env
 - `ENABLE_PROXY`: Set to `true` if running behind a reverse proxy.
 
 ### 3. Start the Application
+
+#### Option A: Local Build (Recommended for development)
 ```bash
 docker-compose up -d --build
+```
+
+#### Option B: Use Pre-built Images (Recommended for production)
+If you don't want to clone the full repository, you can just download the necessary files and run:
+
+```bash
+# Download the compose file and example environment
+curl -L -O https://raw.githubusercontent.com/arumes31/mail-delivery-tester/main/docker-compose.ghcr.yml
+curl -L -O https://raw.githubusercontent.com/arumes31/mail-delivery-tester/main/.env.example
+
+# Setup your environment
+cp .env.example .env
+# ... edit .env with your credentials ...
+
+# Start the application
+docker-compose -f docker-compose.ghcr.yml up -d
 ```
 
 Access the dashboard at `http://localhost:5000`. Persistent data will be stored in the `./data` folder on your host.
