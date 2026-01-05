@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- Welcome Splash Overlay -->
-<div id="welcome-overlay" class="welcome-overlay">
-    <div class="welcome-content text-center">
-        <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="Logo" class="mb-4 splash-logo">
-        <h1 class="fw-bold text-white display-2 mb-2">MailDT Hub</h1>
-        <p class="text-muted fs-4">Unified infrastructure monitoring and diagnostics.</p>
+<!-- Subtle Welcome Notification -->
+<div id="welcome-notification" class="welcome-notification">
+    <div class="d-flex align-items-center gap-3">
+        <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="Logo" style="height: 32px; filter: drop-shadow(0 0 10px rgba(138, 43, 226, 0.6));">
+        <div>
+            <h5 class="fw-bold text-white mb-0" style="font-size: 1rem;">MailDT Hub</h5>
+            <p class="text-muted mb-0" style="font-size: 0.75rem;">Infrastructure monitoring and diagnostics.</p>
+        </div>
     </div>
 </div>
 
@@ -98,7 +100,7 @@
 <!-- Pins Section -->
 <div class="row mb-2">
     <div class="col-md-12 d-flex justify-content-between align-items-center">
-        <h6 class="text-white fw-bold opacity-50 mb-0 text-uppercase letter-spacing-1"><i class="fa-solid fa-thumbtack me-2 text-primary"></i> Pins</h6>
+        <h6 class="text-white fw-bold opacity-50 mb-0 text-uppercase letter-spacing-1" style="font-size: 0.75rem;"><i class="fa-solid fa-thumbtack me-2 text-primary"></i> Pins</h6>
         {% if session.logged_in %}
         <button class="btn btn-xs btn-outline-primary py-0" onclick="openAddModal()" style="font-size: 0.7rem;">
             <i class="fa-solid fa-plus me-1"></i> Pin
@@ -219,53 +221,51 @@
         transform: scale(1.05);
     }
 
-    /* Welcome Splash Styles */
-    .welcome-overlay {
+    /* Subtle Welcome Notification Styles */
+    .welcome-notification {
         position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(15, 10, 26, 0.98);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        transition: opacity 0.8s ease-in-out, visibility 0.8s;
-        backdrop-filter: blur(15px);
-    }
-    .welcome-overlay.hidden {
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-100px);
+        background: rgba(26, 20, 41, 0.9);
+        border: 1px solid var(--bs-primary);
+        padding: 12px 24px;
+        border-radius: 50px;
+        z-index: 10000;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         opacity: 0;
-        visibility: hidden;
+        transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        pointer-events: none;
     }
-    .welcome-content {
-        transform: translateY(30px);
+    .welcome-notification.show {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+    .welcome-notification.hide {
+        transform: translateX(-50%) translateY(-100px);
         opacity: 0;
-        animation: splashIn 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-    @keyframes splashIn {
-        to { transform: translateY(0); opacity: 1; }
-    }
-    .splash-logo {
-        height: 120px;
-        filter: drop-shadow(0 0 30px rgba(138, 43, 226, 0.8));
-        animation: pulseLogo 3s infinite ease-in-out;
-    }
-    @keyframes pulseLogo {
-        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 30px rgba(138, 43, 226, 0.8)); }
-        50% { transform: scale(1.05); filter: drop-shadow(0 0 50px rgba(138, 43, 226, 1)); }
     }
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // Splash Screen Animation
+    // Subtle Fly-in Notification
     document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(() => {
-            const overlay = document.getElementById('welcome-overlay');
-            if (overlay) overlay.classList.add('hidden');
-        }, 3000);
+        const notify = document.getElementById('welcome-notification');
+        if (notify) {
+            // Show after a short delay
+            setTimeout(() => {
+                notify.classList.add('show');
+            }, 500);
+
+            // Hide after a few seconds
+            setTimeout(() => {
+                notify.classList.remove('show');
+                notify.classList.add('hide');
+            }, 4000);
+        }
     });
 
     {% if session.logged_in %}
