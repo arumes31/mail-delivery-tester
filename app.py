@@ -1583,6 +1583,23 @@ def api_widgets():
 def serve_custom_icon(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
+@app.route('/api/widgets/reorder', methods=['POST'])
+@login_required
+def api_widgets_reorder():
+    session_db = Session()
+    try:
+        order_list = request.json.get('order', [])
+        for index, w_id in enumerate(order_list):
+            widget = session_db.get(CustomWidget, w_id)
+            if widget:
+                widget.order = index
+        session_db.commit()
+        return jsonify({'message': 'Order updated'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session_db.close()
+
 @app.route('/api/widgets/<int:w_id>', methods=['POST', 'PUT', 'DELETE'])
 @login_required
 def api_widget_detail(w_id):

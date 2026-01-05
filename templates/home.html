@@ -111,7 +111,7 @@
 
 <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="custom-widgets-list">
     {% for widget in custom_widgets %}
-    <div class="col" id="widget-col-{{ widget.id }}">
+    <div class="col" id="widget-col-{{ widget.id }}" data-id="{{ widget.id }}">
         <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative" style="background: {{ widget.color }}15 !important; border-top: 2px solid {{ widget.color }} !important;">
             {% if session.logged_in %}
             <div class="position-absolute top-0 end-0 p-1 d-flex" style="z-index: 5;">
@@ -269,6 +269,27 @@
     });
 
     {% if session.logged_in %}
+    // Initialize Drag & Drop reordering
+    const el = document.getElementById('custom-widgets-list');
+    const sortable = Sortable.create(el, {
+        animation: 150,
+        ghostClass: 'opacity-25',
+        onEnd: function() {
+            saveOrder();
+        }
+    });
+
+    function saveOrder() {
+        const order = sortable.toArray().map(id => id.replace('widget-col-', ''));
+        fetch('/api/widgets/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: order })
+        }).then(res => {
+            if (!res.ok) showToast('Failed to save order.', 'Error', 'danger');
+        });
+    }
+
     const widgetModal = new bootstrap.Modal(document.getElementById('widgetModal'));
 
     function openAddModal() {
