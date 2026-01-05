@@ -1,35 +1,7 @@
-
-# Shared environment configuration
-x-common-env: &common-env
-  DB_USER: ${DB_USER:-maildt}
-  DB_PASS: ${DB_PASS:-securepassword}
-  DB_NAME: ${DB_NAME:-maildt}
-  DB_HOST: db
-  SMTP_HOST: ${SMTP_HOST}
-  SMTP_PORT: ${SMTP_PORT:-465}
-  SMTP_USER: ${SMTP_USER}
-  SMTP_PASS: ${SMTP_PASS}
-  IMAP_HOST: ${IMAP_HOST}
-  IMAP_PORT: ${IMAP_PORT:-993}
-  IMAP_USER: ${IMAP_USER}
-  IMAP_PASS: ${IMAP_PASS}
-  SEND_INTERVAL: ${SEND_INTERVAL:-3600}
-  CHECK_INTERVAL: ${CHECK_INTERVAL:-30}
-  ALERT_THRESHOLD: ${ALERT_THRESHOLD:-300}
-  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
-  ALERT_MAIL_RECIPIENT: ${ALERT_MAIL_RECIPIENT}
-  ADMIN_USER: ${ADMIN_USER:-admin}
-  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
-  ADMIN_TOTP_SECRET: ${ADMIN_TOTP_SECRET}
-  ENABLE_PROXY: ${ENABLE_PROXY:-true}
-  ENABLE_WHOIS: ${ENABLE_WHOIS:-true}
-  WHOIS_URL: ${WHOIS_URL:-https://whois.reitetschlaeger.com}
-  ENABLE_WEBCHECK: ${ENABLE_WEBCHECK:-true}
-  WEBCHECK_URL: ${WEBCHECK_URL:-https://webcheck-512351112734521.reitetschlaeger.com/}
-
 services:
   db:
     image: postgres:17-alpine
+    env_file: .env
     environment:
       POSTGRES_USER: ${DB_USER:-maildt}
       POSTGRES_PASSWORD: ${DB_PASS:-securepassword}
@@ -53,8 +25,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file: .env
     environment:
-      <<: *common-env
       SERVICE_NAME: "web"
     volumes:
       - ./data-web:/app/data-web
@@ -69,8 +41,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file: .env
     environment:
-      <<: *common-env
       SERVICE_NAME: "scheduler"
     volumes:
       - ./data-web:/app/data-web
