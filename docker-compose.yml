@@ -64,8 +64,6 @@ services:
   scheduler:
     build: .
     command: gunicorn --workers 1 --threads 2 --bind 0.0.0.0:5001 --access-logfile - --error-logfile - --capture-output scheduler:app
-    ports:
-      - "5001:5001"
     depends_on:
       db:
         condition: service_healthy
