@@ -925,6 +925,16 @@ def settings():
         
     return render_template('settings.html', config=safe_config)
 
+@app.route('/api/scheduler/health')
+@login_required
+def api_scheduler_health():
+    try:
+        # Scheduler is reachable via docker service name
+        response = requests.get("http://scheduler:5001/health", timeout=2)
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 503
+
 @app.route('/recipients')
 @login_required
 def recipients_page():
