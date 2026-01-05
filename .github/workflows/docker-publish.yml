@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 1. Multi-platform support setup (QEMU for ARM64 emulation)
       - name: Set up QEMU
