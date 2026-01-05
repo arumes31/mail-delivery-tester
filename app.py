@@ -1549,6 +1549,7 @@ def api_widgets():
             title = request.form.get('title')
             url = request.form.get('url')
             icon = request.form.get('icon', 'fa-link')
+            if not icon: icon = 'fa-link' # Fallback
             color = request.form.get('color', '#8a2be2')
             is_private = request.form.get('is_private', 'false').lower() == 'true'
             

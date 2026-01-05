@@ -73,7 +73,6 @@
     </div>
     {% endif %}
 
-    <!-- Dashboard (Live Monitor) -->
     <div class="col">
         <a href="/dashboard" class="text-decoration-none h-100 d-block">
             <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
@@ -110,9 +109,9 @@
 <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="custom-widgets-list">
     {% for widget in custom_widgets %}
     <div class="col" id="widget-col-{{ widget.id }}">
-        <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative" style="border-top: 3px solid {{ widget.color }} !important;">
+        <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative" style="background: {{ widget.color }}15 !important; border-top: 3px solid {{ widget.color }} !important;">
             {% if session.logged_in %}
-            <div class="position-absolute top-0 end-0 p-1 d-flex">
+            <div class="position-absolute top-0 end-0 p-1 d-flex" style="z-index: 5;">
                 <button class="btn btn-link btn-sm text-muted p-0 opacity-50 me-1" onclick='openEditModal({{ widget|tojson }})'><i class="fa-solid fa-edit"></i></button>
                 <button class="btn btn-link btn-sm text-muted p-0 opacity-50" onclick="deleteWidget({{ widget.id }})"><i class="fa-solid fa-times"></i></button>
             </div>
@@ -139,7 +138,7 @@
     <div class="modal-dialog">
         <div class="modal-content shadow-lg border-primary">
             <div class="modal-header">
-                <h5 class="modal-title text-white" id="modalTitle">Add Custom Widget</h5>
+                <h5 class="modal-title text-white" id="modalTitle">Add Pin</h5>
                 <button type="button" class="btn-close shadow-none" data-bs-dismiss="modal" style="filter: hue-rotate(240deg) brightness(1.5);"></button>
             </div>
             <div class="modal-body">
@@ -156,31 +155,44 @@
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label small fw-bold">Icon Class</label>
-                            <input type="text" class="form-control bg-dark border-secondary text-white" id="w-icon" value="fa-link">
+                            <label class="form-label small fw-bold">Icon</label>
+                            <select class="form-select bg-dark border-secondary text-white" id="w-icon">
+                                <option value="fa-link">Link</option>
+                                <option value="fa-server">Server</option>
+                                <option value="fa-globe">Globe</option>
+                                <option value="fa-shield-halved">Shield</option>
+                                <option value="fa-envelope">Mail</option>
+                                <option value="fa-database">Database</option>
+                                <option value="fa-terminal">Terminal</option>
+                                <option value="fa-chart-area">Charts</option>
+                                <option value="fa-cog">Settings</option>
+                                <option value="fa-search">Search</option>
+                                <option value="fa-lock">Security</option>
+                                <option value="fa-cloud">Cloud</option>
+                            </select>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label class="form-label small fw-bold">Color</label>
+                            <label class="form-label small fw-bold">Theme Color</label>
                             <input type="color" class="form-control form-control-color bg-dark border-secondary w-100" id="w-color" value="#8a2be2">
                         </div>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label small fw-bold">Custom Image Icon (Optional)</label>
+                        <label class="form-label small fw-bold">Custom Image (Optional)</label>
                         <input type="file" class="form-control bg-dark border-secondary text-white" id="w-file" accept="image/*">
                     </div>
 
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="w-private">
                         <label class="form-check-label text-white small" for="w-private">
-                            <i class="fa-solid fa-eye-slash me-1"></i> Private Widget (Only visible when logged in)
+                            <i class="fa-solid fa-eye-slash me-1"></i> Private (Admins Only)
                         </label>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary px-4" id="saveBtn" onclick="saveWidget()">Save Widget</button>
+                <button type="button" class="btn btn-primary px-4" id="saveBtn" onclick="saveWidget()">Save Pin</button>
             </div>
         </div>
     </div>
@@ -191,14 +203,12 @@
     .home-widget {
         transition: all 0.3s cubic-bezier(.25,.8,.25,1);
         cursor: pointer;
-        background: rgba(26, 20, 41, 0.6) !important;
-        backdrop-filter: blur(5px);
+        backdrop-filter: blur(10px);
         border: 1px solid rgba(255,255,255,0.05) !important;
     }
     .home-widget:hover {
         transform: translateY(-5px);
-        background: rgba(138, 43, 226, 0.1) !important;
-        border-color: rgba(138, 43, 226, 0.3) !important;
+        filter: brightness(1.2);
         box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important;
     }
     .widget-icon {
@@ -242,7 +252,7 @@
         document.getElementById('w-icon').value = 'fa-link';
         document.getElementById('w-color').value = '#8a2be2';
         document.getElementById('w-private').checked = false;
-        document.getElementById('modalTitle').innerText = 'Add Custom Widget';
+        document.getElementById('modalTitle').innerText = 'Add Pin';
         widgetModal.show();
     }
 
@@ -253,7 +263,7 @@
         document.getElementById('w-icon').value = widget.icon;
         document.getElementById('w-color').value = widget.color;
         document.getElementById('w-private').checked = widget.is_private;
-        document.getElementById('modalTitle').innerText = 'Edit Custom Widget';
+        document.getElementById('modalTitle').innerText = 'Edit Pin';
         widgetModal.show();
     }
 
@@ -274,7 +284,7 @@
         if (!document.getElementById('w-title').value || !document.getElementById('w-url').value) return;
 
         const url = id ? `/api/widgets/${id}` : '/api/widgets';
-        const method = 'POST'; // Always use POST for multipart reliability
+        const method = 'POST'; 
         
         if (id) {
             form.append('_method', 'PUT');
@@ -287,18 +297,18 @@
             if (res.ok) {
                 location.reload();
             } else {
-                showToast('Failed to save widget.', 'Error', 'danger');
+                showToast('Failed to save Pin.', 'Error', 'danger');
             }
         });
     }
 
     function deleteWidget(id) {
-        if (!confirm('Delete this widget?')) return;
+        if (!confirm('Delete this Pin?')) return;
         fetch(`/api/widgets/${id}`, { method: 'DELETE' })
             .then(res => {
                 if (res.ok) {
                     document.getElementById(`widget-col-${id}`).remove();
-                    showToast('Widget deleted.', 'Success');
+                    showToast('Pin deleted.', 'Success');
                 }
             });
     }
