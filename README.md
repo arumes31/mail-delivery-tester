@@ -64,8 +64,18 @@ docker-compose up -d --build
 ```
 
 #### Option B: Use Pre-built Images (Recommended for production)
-You can use the official pre-built images from the GitHub Container Registry to save time and ensure consistency:
+If you don't want to clone the full repository, you can just download the necessary files and run:
+
 ```bash
+# Download the compose file and example environment
+curl -L -O https://raw.githubusercontent.com/arumes31/mail-delivery-tester/main/docker-compose.ghcr.yml
+curl -L -O https://raw.githubusercontent.com/arumes31/mail-delivery-tester/main/.env.example
+
+# Setup your environment
+cp .env.example .env
+# ... edit .env with your credentials ...
+
+# Start the application
 docker-compose -f docker-compose.ghcr.yml up -d
 ```
 
