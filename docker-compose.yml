@@ -1,5 +1,32 @@
 version: '3.8'
 
+x-common-env: &common-env
+  DB_USER: ${DB_USER:-maildt}
+  DB_PASS: ${DB_PASS:-securepassword}
+  DB_NAME: ${DB_NAME:-maildt}
+  DB_HOST: db
+  SMTP_HOST: ${SMTP_HOST}
+  SMTP_PORT: ${SMTP_PORT:-465}
+  SMTP_USER: ${SMTP_USER}
+  SMTP_PASS: ${SMTP_PASS}
+  IMAP_HOST: ${IMAP_HOST}
+  IMAP_PORT: ${IMAP_PORT:-993}
+  IMAP_USER: ${IMAP_USER}
+  IMAP_PASS: ${IMAP_PASS}
+  SEND_INTERVAL: ${SEND_INTERVAL:-3600}
+  CHECK_INTERVAL: ${CHECK_INTERVAL:-30}
+  ALERT_THRESHOLD: ${ALERT_THRESHOLD:-300}
+  DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+  ALERT_MAIL_RECIPIENT: ${ALERT_MAIL_RECIPIENT}
+  ADMIN_USER: ${ADMIN_USER:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+  ADMIN_TOTP_SECRET: ${ADMIN_TOTP_SECRET}
+  ENABLE_PROXY: ${ENABLE_PROXY:-true}
+  ENABLE_WHOIS: ${ENABLE_WHOIS:-true}
+  WHOIS_URL: ${WHOIS_URL:-https://whois.reitetschlaeger.com}
+  ENABLE_WEBCHECK: ${ENABLE_WEBCHECK:-true}
+  WEBCHECK_URL: ${WEBCHECK_URL:-https://webcheck-512351112734521.reitetschlaeger.com/}
+
 services:
   db:
     image: postgres:17-alpine
@@ -17,45 +44,34 @@ services:
       timeout: 5s
       retries: 5
 
-  app:
+  web:
     build: .
+    command: gunicorn --workers 2 --threads 2 --bind 0.0.0.0:5000 --access-logfile - --error-logfile - --capture-output app:app
     ports:
       - "${PORT:-5000}:5000"
     depends_on:
       db:
         condition: service_healthy
     environment:
-      - DB_USER=${DB_USER:-maildt}
-      - DB_PASS=${DB_PASS:-securepassword}
-      - DB_NAME=${DB_NAME:-maildt}
-      - DB_HOST=db
-      # Mail Configuration
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT:-465}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
-      - IMAP_HOST=${IMAP_HOST}
-      - IMAP_PORT=${IMAP_PORT:-993}
-      - IMAP_USER=${IMAP_USER}
-      - IMAP_PASS=${IMAP_PASS}
-      # App Logic
-      - SEND_INTERVAL=${SEND_INTERVAL:-3600} # Seconds between emails
-      - CHECK_INTERVAL=${CHECK_INTERVAL:-30} # Seconds between IMAP checks
-      - ALERT_THRESHOLD=${ALERT_THRESHOLD:-300} # Seconds before marking as delayed
-      # Alerting
-      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
-      - ALERT_MAIL_RECIPIENT=${ALERT_MAIL_RECIPIENT} # Separate mail for alerts
-      # Authentication
-      - ADMIN_USER=${ADMIN_USER:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
-      - ADMIN_TOTP_SECRET=${ADMIN_TOTP_SECRET}
-      # Proxy Configuration
-      - ENABLE_PROXY=${ENABLE_PROXY:-true}
-      # External Tools
-      - ENABLE_WHOIS=${ENABLE_WHOIS:-true}
-      - WHOIS_URL=${WHOIS_URL:-https://whois.reitetschlaeger.com}
-      - ENABLE_WEBCHECK=${ENABLE_WEBCHECK:-true}
-      - WEBCHECK_URL=${WEBCHECK_URL:-https://webcheck-512351112734521.reitetschlaeger.com/}
+      <<: *common-env
+      SERVICE_NAME: "web"
+    volumes:
+      - ./data-web:/app/data-web
+    networks:
+      - maildt_net
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: gunicorn --workers 1 --threads 2 --bind 0.0.0.0:5001 --access-logfile - --error-logfile - --capture-output scheduler:app
+    ports:
+      - "5001:5001"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "scheduler"
     volumes:
       - ./data-web:/app/data-web
     networks:
