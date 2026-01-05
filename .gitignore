@@ -3,3 +3,4 @@ redis-data/dump.rdb
 .dockerignore
 .env
 data/
+data-web/
