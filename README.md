@@ -1,5 +1,10 @@
 # MailDT - Mail Delivery Monitor
 
+[![Build and Publish Docker Image](https://github.com/arumes31/mail-delivery-tester/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/docker-publish.yml)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://github.com/arumes31/mail-delivery-tester/pkgs/container/mail-delivery-tester)
+![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)
+![License](https://img.shields.io/github/license/arumes31/mail-delivery-tester)
+
 <p align="center">
   <img src="static/img/logo.svg" width="120" alt="MailDT Logo">
 </p>
