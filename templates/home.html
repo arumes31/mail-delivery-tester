@@ -11,16 +11,6 @@
 
 <!-- System Widgets -->
 <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3 mb-5">
-    <!-- Dashboard -->
-    <div class="col">
-        <a href="/dashboard" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
-                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-chart-line fa-2x"></i></div>
-                <h6 class="text-white fw-bold mb-0">Live Monitor</h6>
-            </div>
-        </a>
-    </div>
-
     <!-- Mail Tester -->
     <div class="col">
         <a href="/mail-tester" class="text-decoration-none h-100 d-block">
@@ -82,6 +72,16 @@
         </a>
     </div>
     {% endif %}
+
+    <!-- Dashboard (Live Monitor) -->
+    <div class="col">
+        <a href="/dashboard" class="text-decoration-none h-100 d-block">
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-chart-line fa-2x"></i></div>
+                <h6 class="text-white fw-bold mb-0">Live Monitor</h6>
+            </div>
+        </a>
+    </div>
 
     {% if session.logged_in %}
     <div class="col">
