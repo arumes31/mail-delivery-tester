@@ -1,6 +1,6 @@
 Flask==3.1.2
 SQLAlchemy==2.0.45
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.11
 APScheduler==3.11.2
 requests==2.32.5
 python-dotenv==1.2.1
