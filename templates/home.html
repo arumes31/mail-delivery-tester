@@ -29,7 +29,7 @@
         <a href="/smtp-test" class="text-decoration-none h-100 d-block">
             <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
                 <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-envelope-circle-check fa-2x"></i></div>
-                <div class="text-white fw-bold">SMTP Diag</div>
+                <div class="text-white fw-bold">SMTP Diagnostics</div>
             </div>
         </a>
     </div>
@@ -76,21 +76,30 @@
     </div>
     {% endif %}
 
+    {% if session.logged_in %}
     <div class="col">
         <a href="/dashboard" class="text-decoration-none h-100 d-block">
             <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
                 <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-chart-line fa-2x"></i></div>
-                <div class="text-white fw-bold">Monitor</div>
+                <div class="text-white fw-bold">Live Monitor</div>
             </div>
         </a>
     </div>
 
-    {% if session.logged_in %}
     <div class="col">
         <a href="/recipients" class="text-decoration-none h-100 d-block">
             <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
                 <div class="widget-icon mb-2 text-info"><i class="fa-solid fa-users fa-2x"></i></div>
                 <div class="text-white fw-bold">Recipients</div>
+            </div>
+        </a>
+    </div>
+    {% else %}
+    <div class="col">
+        <a href="/login" class="text-decoration-none h-100 d-block">
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-warning"><i class="fa-solid fa-right-to-bracket fa-2x"></i></div>
+                <div class="text-white fw-bold">Login</div>
             </div>
         </a>
     </div>
