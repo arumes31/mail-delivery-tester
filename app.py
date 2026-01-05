@@ -24,13 +24,15 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, desc
 from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
-from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- Configuration ---
 def get_env_var(name, default=None, var_type=str):
     val = os.environ.get(name, default)
     if val is None:
         return None
+    if var_type == bool:
+        if isinstance(val, bool): return val
+        return val.lower() in ('true', 'yes', '1', 't', 'y')
     return var_type(val)
 
 # Ensure data directory exists for persistence
@@ -67,19 +69,36 @@ CONFIG = {
     'ADMIN_USER': get_env_var('ADMIN_USER', 'admin'),
     'ADMIN_PASSWORD': get_env_var('ADMIN_PASSWORD', 'admin'),
     'ADMIN_TOTP_SECRET': get_env_var('ADMIN_TOTP_SECRET'),
-    'ENABLE_PROXY': get_env_var('ENABLE_PROXY', 'false').lower() == 'true',
-    'ENABLE_WHOIS': get_env_var('ENABLE_WHOIS', 'true').lower() == 'true',
+    'ENABLE_PROXY': get_env_var('ENABLE_PROXY', 'false', bool),
+    'ENABLE_WHOIS': get_env_var('ENABLE_WHOIS', 'true', bool),
     'WHOIS_URL': get_env_var('WHOIS_URL', 'https://whois.reitetschlaeger.com'),
-    'ENABLE_WEBCHECK': get_env_var('ENABLE_WEBCHECK', 'true').lower() == 'true',
+    'ENABLE_WEBCHECK': get_env_var('ENABLE_WEBCHECK', 'true', bool),
     'WEBCHECK_URL': get_env_var('WEBCHECK_URL', 'https://webcheck-512351112734521.reitetschlaeger.com/'),
 }
 
 # --- Setup Logging ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+SERVICE_NAME = os.environ.get('SERVICE_NAME', 'app')
+logging.basicConfig(
+    level=logging.INFO, 
+    format=f'%(asctime)s - {SERVICE_NAME} - [PID:%(process)d] - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # --- Database Setup ---
-engine = create_engine(CONFIG['DATABASE_URL'])
+def get_engine(url, max_retries=5, delay=5):
+    for i in range(max_retries):
+        try:
+            e = create_engine(url)
+            # Try to connect to verify
+            with e.connect() as conn:
+                return e
+        except Exception as err:
+            if i == max_retries - 1:
+                raise err
+            logger.warning(f"Database connection attempt {i+1} failed. Retrying in {delay}s...")
+            time.sleep(delay)
+
+engine = get_engine(CONFIG['DATABASE_URL'])
 Session = scoped_session(sessionmaker(bind=engine))
 Base = declarative_base()
 
@@ -150,6 +169,11 @@ class GlobalCounter(Base):
     counter_name = Column(String(50), unique=True)
     count = Column(Integer, default=0)
 
+class ActiveTestSignal(Base):
+    __tablename__ = 'active_test_signals'
+    test_id = Column(String(50), primary_key=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class CustomWidget(Base):
     __tablename__ = 'custom_widgets'
     id = Column(Integer, primary_key=True)
@@ -161,11 +185,12 @@ class CustomWidget(Base):
     color = Column(String(20), default='#8a2be2')
     order = Column(Integer, default=0)
 
-Base.metadata.create_all(engine)
-
 # --- Migration Helpers ---
 def run_migrations():
     """Simple migration to add columns if they don't exist."""
+    # Ensure tables exist first
+    Base.metadata.create_all(engine)
+    
     session = Session()
     try:
         from sqlalchemy import text
@@ -245,6 +270,14 @@ def run_migrations():
             session.execute(text("ALTER TABLE recipients ADD COLUMN alert_active BOOLEAN DEFAULT FALSE"))
             session.commit()
 
+        # Check for active_test_signals table
+        try:
+            session.execute(text("SELECT 1 FROM active_test_signals LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: creating active_test_signals table")
+            Base.metadata.create_all(engine)
+
     except Exception as e:
         logger.error(f"Migration failed: {e}")
         session.rollback()
@@ -264,9 +297,6 @@ def reset_alert_states():
         session_db.rollback()
     finally:
         session_db.close()
-
-run_migrations()
-reset_alert_states()
 
 def record_usage(tool_name):
     """Records a tool usage event in the database."""
@@ -471,7 +501,6 @@ def send_probe_email():
         session.close()
 
 # --- Global state for fast polling & rate limiting ---
-ACTIVE_TESTS = {} # {test_id: timestamp}
 IP_RATE_LIMITS = {} # {ip: [timestamps]}
 LOGIN_ATTEMPTS = {} # {ip: [timestamps]}
 BLACKLIST_ATTEMPTS = {} # {ip: [timestamps]}
@@ -493,22 +522,22 @@ def check_inbox():
         return
 
     now = datetime.datetime.utcnow()
-    
-    # Cleanup expired tests (older than 10 mins)
-    expired = [tid for tid, ts in ACTIVE_TESTS.items() if (now - ts).total_seconds() > 600]
-    for tid in expired:
-        del ACTIVE_TESTS[tid]
-    
-    has_active_tests = len(ACTIVE_TESTS) > 0
-    
-    # Throttle if no active tests
-    seconds_since_last = (now - LAST_IMAP_CHECK).total_seconds()
-    if not has_active_tests and seconds_since_last < CONFIG['CHECK_INTERVAL']:
-        return
-
-    LAST_IMAP_CHECK = now
     session = Session()
     try:
+        # Cleanup expired signals (older than 10 mins)
+        cutoff = now - datetime.timedelta(minutes=10)
+        session.query(ActiveTestSignal).filter(ActiveTestSignal.created_at < cutoff).delete()
+        session.commit()
+
+        has_active_tests = session.query(ActiveTestSignal).count() > 0
+        
+        # Throttle if no active tests
+        seconds_since_last = (now - LAST_IMAP_CHECK).total_seconds()
+        if not has_active_tests and seconds_since_last < CONFIG['CHECK_INTERVAL']:
+            return
+
+        LAST_IMAP_CHECK = now
+
         mail = imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'])
         mail.login(CONFIG['IMAP_USER'], CONFIG['IMAP_PASS'])
         mail.select("inbox")
@@ -1424,8 +1453,7 @@ def api_mail_tester_check(test_id):
             }
             
             # If found, we can remove from active tracking
-            if test_id in ACTIVE_TESTS:
-                del ACTIVE_TESTS[test_id]
+            session.query(ActiveTestSignal).filter_by(test_id=test_id).delete()
             
             # Remove from database so it's only "received" once
             session.delete(test)
@@ -1438,9 +1466,22 @@ def api_mail_tester_check(test_id):
 
 @app.route('/api/mail-tester/start/<test_id>', methods=['POST'])
 def api_mail_tester_start(test_id):
-    ACTIVE_TESTS[test_id] = datetime.datetime.utcnow()
+    session_db = Session()
+    try:
+        # Use database to signal active tests across workers
+        existing = session_db.query(ActiveTestSignal).filter_by(test_id=test_id).first()
+        if not existing:
+            new_signal = ActiveTestSignal(test_id=test_id)
+            session_db.add(new_signal)
+            session_db.commit()
+    except Exception as e:
+        logger.error(f"Failed to start active test signal: {e}")
+        session_db.rollback()
+    finally:
+        session_db.close()
+
     record_usage('mail-tester')
-    logger.info(f"Fast polling enabled for test: {test_id}")
+    logger.info(f"Fast polling signal recorded for test: {test_id}")
     return jsonify({'status': 'started'})
 
 @app.route('/api/recipients', methods=['GET', 'POST'])
@@ -1852,28 +1893,6 @@ def cleanup_old_probes():
     finally:
         session_db.close()
 
-# --- Scheduler Setup ---
-scheduler = BackgroundScheduler()
-
-# Add jobs if config is present (checking basic vars)
-if CONFIG['SMTP_HOST']:
-    # Check for sends every 30 seconds
-    scheduler.add_job(func=send_probe_email, trigger="interval", seconds=30)
-    logger.info(f"Scheduler: Added send job every 30s (checking per-recipient schedules)")
-
-if CONFIG['IMAP_HOST']:
-    # We run the job frequently, but the function itself handles throttling if no active tests are running
-    scheduler.add_job(func=check_inbox, trigger="interval", seconds=5)
-    logger.info(f"Scheduler: Added check job (fast-mode enabled when tests are active)")
-
-scheduler.add_job(func=check_delays, trigger="interval", seconds=30) # Check delays every 30s
-scheduler.add_job(func=cleanup_old_probes, trigger="interval", hours=24) # Cleanup daily
-scheduler.start()
-
 # --- Main Entry ---
 if __name__ == '__main__':
-    # Shutdown scheduler on exit? It's a daemon, but good practice.
-    import atexit
-    atexit.register(lambda: scheduler.shutdown())
-    
     app.run(host='0.0.0.0', port=5000, debug=False)
