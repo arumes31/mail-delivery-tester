@@ -37,7 +37,7 @@ def get_env_var(name, default=None, var_type=str):
 if not os.path.exists('data'):
     os.makedirs('data')
 
-UPLOAD_FOLDER = os.path.join('data', 'custom_icons')
+UPLOAD_FOLDER = os.path.join('data-web', 'custom_icons')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
