@@ -113,14 +113,14 @@
         <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative">
             {% if session.logged_in %}
             <div class="position-absolute top-0 end-0 p-1 d-flex">
-                <button class="btn btn-link btn-sm text-muted p-0 opacity-50 me-1" onclick="openEditModal({{ widget|tojson }})"><i class="fa-solid fa-edit"></i></button>
+                <button class="btn btn-link btn-sm text-muted p-0 opacity-50 me-1" onclick='openEditModal({{ widget|tojson }})'><i class="fa-solid fa-edit"></i></button>
                 <button class="btn btn-link btn-sm text-muted p-0 opacity-50" onclick="deleteWidget({{ widget.id }})"><i class="fa-solid fa-times"></i></button>
             </div>
             {% endif %}
             <a href="{{ widget.url }}" target="_blank" class="text-decoration-none text-center d-block">
                 <div class="widget-icon mb-2 d-flex justify-content-center align-items-center" style="height: 48px;">
                     {% if widget.image_path %}
-                        <img src="{{ widget.image_path }}" style="max-height: 40px; max-width: 48px; object-fit: contain;">
+                        <img src="{{ widget.image_path }}" class="rounded-circle border border-secondary" style="width: 48px; height: 48px; object-fit: cover;">
                     {% else %}
                         <i class="fa-solid {{ widget.icon }} fa-2x" style="color: {{ widget.color }};"></i>
                     {% endif %}
@@ -274,7 +274,11 @@
         if (!document.getElementById('w-title').value || !document.getElementById('w-url').value) return;
 
         const url = id ? `/api/widgets/${id}` : '/api/widgets';
-        const method = id ? 'PUT' : 'POST';
+        const method = 'POST'; // Always use POST for multipart reliability
+        
+        if (id) {
+            form.append('_method', 'PUT');
+        }
 
         fetch(url, {
             method: method,

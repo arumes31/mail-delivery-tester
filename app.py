@@ -1582,7 +1582,7 @@ def api_widgets():
 def serve_custom_icon(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
-@app.route('/api/widgets/<int:w_id>', methods=['PUT', 'DELETE'])
+@app.route('/api/widgets/<int:w_id>', methods=['POST', 'PUT', 'DELETE'])
 @login_required
 def api_widget_detail(w_id):
     session_db = Session()
@@ -1596,7 +1596,7 @@ def api_widget_detail(w_id):
             session_db.commit()
             return jsonify({'message': 'Deleted'})
         
-        elif request.method == 'PUT':
+        elif request.method == 'PUT' or (request.method == 'POST' and request.form.get('_method') == 'PUT'):
             # Support both JSON and multipart for updates
             if request.is_json:
                 data = request.json
