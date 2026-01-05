@@ -1593,6 +1593,16 @@ def api_widget_detail(w_id):
             return jsonify({'error': 'Not found'}), 404
         
         if request.method == 'DELETE':
+            # Delete associated icon file if it exists
+            if widget.image_path:
+                try:
+                    # Strip the leading slash from the path stored in DB
+                    file_path = os.path.join(UPLOAD_FOLDER, os.path.basename(widget.image_path))
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except Exception as e:
+                    logger.error(f"Failed to delete icon file: {e}")
+
             session_db.delete(widget)
             session_db.commit()
             return jsonify({'message': 'Deleted'})
