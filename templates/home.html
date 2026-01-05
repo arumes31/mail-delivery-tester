@@ -125,7 +125,7 @@
             {% if session.logged_in %}
             <div class="position-absolute top-0 end-0 p-1 d-flex" style="z-index: 5;">
                 <button class="btn btn-link btn-xs text-muted p-0 opacity-50 me-1" onclick='openEditModal({{ widget|tojson }})'><i class="fa-solid fa-edit" style="font-size: 0.6rem;"></i></button>
-                <button class="btn btn-link btn-xs text-muted p-0 opacity-50" onclick="deleteWidget({{ widget.id }})"><i class="fa-solid fa-times" style="font-size: 0.6rem;"></i></button>
+                <button class="btn btn-link btn-xs text-muted p-0 opacity-50" onclick="deleteWidget({{ widget.id }}, '{{ widget.title }}')"><i class="fa-solid fa-times" style="font-size: 0.6rem;"></i></button>
             </div>
             {% endif %}
             <a href="{{ widget.url }}" target="_blank" class="text-decoration-none text-center d-block">
@@ -154,7 +154,7 @@
                 <button type="button" class="btn-close btn-close-white shadow-none" data-bs-dismiss="modal" aria-label="Close" style="filter: hue-rotate(240deg) brightness(1.5);"></button>
             </div>
             <div class="modal-body">
-                <p>Are you sure you want to delete this Pin?</p>
+                <p>Are you sure you want to delete the Pin <strong id="deletePinDisplay"></strong>?</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -379,8 +379,9 @@
         });
     }
 
-    function deleteWidget(id) {
+    function deleteWidget(id, title) {
         widgetToDeleteId = id;
+        document.getElementById('deletePinDisplay').innerText = title;
         deleteModal.show();
     }
 
