@@ -13,13 +13,13 @@
 </div>
 
 <!-- System Widgets -->
-<div class="row row-cols-2 row-cols-md-4 row-cols-lg-6 row-cols-xl-8 g-2 mb-5">
+<div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3 mb-5">
     <!-- Mail Tester -->
     <div class="col">
         <a href="/mail-tester" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-flask fa-xl"></i></div>
-                <div class="text-white small fw-bold">Mail Tester</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-flask fa-2x"></i></div>
+                <div class="text-white fw-bold">Mail Tester</div>
             </div>
         </a>
     </div>
@@ -27,9 +27,9 @@
     <!-- SMTP Diagnostics -->
     <div class="col">
         <a href="/smtp-test" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-envelope-circle-check fa-xl"></i></div>
-                <div class="text-white small fw-bold">SMTP Diag</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-envelope-circle-check fa-2x"></i></div>
+                <div class="text-white fw-bold">SMTP Diag</div>
             </div>
         </a>
     </div>
@@ -37,9 +37,9 @@
     <!-- Blacklist Check -->
     <div class="col">
         <a href="/blacklist-check" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-list-check fa-xl"></i></div>
-                <div class="text-white small fw-bold">Blacklist</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-list-check fa-2x"></i></div>
+                <div class="text-white fw-bold">Blacklist</div>
             </div>
         </a>
     </div>
@@ -47,9 +47,9 @@
     <!-- Decode Spam -->
     <div class="col">
         <a href="/decode-spam" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-code fa-xl"></i></div>
-                <div class="text-white small fw-bold">Decoder</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-code fa-2x"></i></div>
+                <div class="text-white fw-bold">Decoder</div>
             </div>
         </a>
     </div>
@@ -57,9 +57,9 @@
     {% if config.ENABLE_WHOIS %}
     <div class="col">
         <a href="/whois" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-search fa-xl"></i></div>
-                <div class="text-white small fw-bold">WHOIS</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-search fa-2x"></i></div>
+                <div class="text-white fw-bold">WHOIS</div>
             </div>
         </a>
     </div>
@@ -68,9 +68,9 @@
     {% if config.ENABLE_WEBCHECK %}
     <div class="col">
         <a href="/web-check" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-globe fa-xl"></i></div>
-                <div class="text-white small fw-bold">Web Check</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-globe fa-2x"></i></div>
+                <div class="text-white fw-bold">Web Check</div>
             </div>
         </a>
     </div>
@@ -78,9 +78,9 @@
 
     <div class="col">
         <a href="/dashboard" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-primary"><i class="fa-solid fa-chart-line fa-xl"></i></div>
-                <div class="text-white small fw-bold">Monitor</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-primary"><i class="fa-solid fa-chart-line fa-2x"></i></div>
+                <div class="text-white fw-bold">Monitor</div>
             </div>
         </a>
     </div>
@@ -88,9 +88,9 @@
     {% if session.logged_in %}
     <div class="col">
         <a href="/recipients" class="text-decoration-none h-100 d-block">
-            <div class="card h-100 home-widget border-0 shadow-lg text-center p-2">
-                <div class="widget-icon mb-1 text-info"><i class="fa-solid fa-users fa-xl"></i></div>
-                <div class="text-white small fw-bold">Recipients</div>
+            <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
+                <div class="widget-icon mb-2 text-info"><i class="fa-solid fa-users fa-2x"></i></div>
+                <div class="text-white fw-bold">Recipients</div>
             </div>
         </a>
     </div>
@@ -109,10 +109,10 @@
     </div>
 </div>
 
-<div class="row row-cols-2 row-cols-md-4 row-cols-lg-6 row-cols-xl-8 g-2" id="custom-widgets-list">
+<div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="custom-widgets-list">
     {% for widget in custom_widgets %}
     <div class="col" id="widget-col-{{ widget.id }}">
-        <div class="card h-100 home-widget border-0 shadow-lg p-2 position-relative" style="background: {{ widget.color }}15 !important; border-top: 2px solid {{ widget.color }} !important;">
+        <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative" style="background: {{ widget.color }}15 !important; border-top: 2px solid {{ widget.color }} !important;">
             {% if session.logged_in %}
             <div class="position-absolute top-0 end-0 p-1 d-flex" style="z-index: 5;">
                 <button class="btn btn-link btn-xs text-muted p-0 opacity-50 me-1" onclick='openEditModal({{ widget|tojson }})'><i class="fa-solid fa-edit" style="font-size: 0.6rem;"></i></button>
@@ -120,14 +120,14 @@
             </div>
             {% endif %}
             <a href="{{ widget.url }}" target="_blank" class="text-decoration-none text-center d-block">
-                <div class="widget-icon mb-1 d-flex justify-content-center align-items-center" style="height: 32px;">
+                <div class="widget-icon mb-2 d-flex justify-content-center align-items-center" style="height: 48px;">
                     {% if widget.image_path %}
-                        <img src="{{ widget.image_path }}" class="rounded-circle border" style="width: 32px; height: 32px; object-fit: cover; border-color: {{ widget.color }} !important;">
+                        <img src="{{ widget.image_path }}" class="rounded-circle border" style="width: 48px; height: 48px; object-fit: cover; border-color: {{ widget.color }} !important;">
                     {% else %}
-                        <i class="fa-solid {{ widget.icon }} fa-xl" style="color: {{ widget.color }} !important;"></i>
+                        <i class="fa-solid {{ widget.icon }} fa-2x" style="color: {{ widget.color }} !important;"></i>
                     {% endif %}
                 </div>
-                <div class="text-white small fw-bold text-truncate px-1" title="{{ widget.title }}">{{ widget.title }}</div>
+                <div class="text-white fw-bold text-truncate px-1" title="{{ widget.title }}">{{ widget.title }}</div>
                 {% if widget.is_private %}<div style="font-size: 0.4rem;" class="text-warning text-uppercase fw-bold"><i class="fa-solid fa-lock me-1"></i>Private</div>{% endif %}
             </a>
         </div>
