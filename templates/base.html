@@ -172,7 +172,9 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-chart-line me-1 text-primary"></i> Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-house me-1 text-primary"></i> Home</a></li>
+                    
+                    {% if request.endpoint != 'home_page' %}
                     <li class="nav-item"><a class="nav-link" href="/mail-tester"><i class="fa-solid fa-flask me-1 text-primary"></i> Mail Tester</a></li>
                     <li class="nav-item"><a class="nav-link" href="/smtp-test"><i class="fa-solid fa-envelope-circle-check me-1 text-primary"></i> SMTP Diagnostics</a></li>
                     <li class="nav-item"><a class="nav-link" href="/blacklist-check"><i class="fa-solid fa-list-check me-1 text-primary"></i> Blacklist Check</a></li>
@@ -183,9 +185,13 @@
                     {% if config.ENABLE_WEBCHECK %}
                     <li class="nav-item"><a class="nav-link" href="/web-check"><i class="fa-solid fa-globe me-1 text-primary"></i> Web Check</a></li>
                     {% endif %}
+                    <li class="nav-item"><a class="nav-link" href="/dashboard"><i class="fa-solid fa-chart-line me-1 text-primary"></i> Live Monitor</a></li>
+                    {% endif %}
+
                     {% if session.logged_in %}
+                    {% if request.endpoint != 'home_page' %}
                     <li class="nav-item"><a class="nav-link" href="/recipients"><i class="fa-solid fa-users me-1 text-primary"></i> Recipients</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/settings"><i class="fa-solid fa-gears me-1 text-primary"></i> Settings</a></li>
+                    {% endif %}
                     <li class="nav-item"><a class="nav-link text-warning" href="/logout"><i class="fa-solid fa-right-from-bracket me-1"></i> Logout</a></li>
                     {% else %}
                     <li class="nav-item"><a class="nav-link" href="/login"><i class="fa-solid fa-right-to-bracket me-1 text-primary"></i> Login</a></li>
@@ -213,6 +219,8 @@
     </div>
 
     <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+    <!-- SortableJS (Local) -->
+    <script src="{{ url_for('static', filename='js/Sortable.min.js') }}"></script>
     <script>
         function showToast(message, title='Notification', type='info') {
             const toastEl = document.getElementById('liveToast');
