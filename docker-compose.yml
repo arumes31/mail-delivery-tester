@@ -10,6 +10,7 @@ services:
       - ./data:/var/lib/postgresql/data
     networks:
       - maildt_net
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U maildt"]
       interval: 10s
