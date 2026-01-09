@@ -53,11 +53,17 @@ if __name__ == '__main__':
         def ansi_with_color(c, s):
             return f"\033[{c}m{s}\033[0m"
         dsh.Logger.with_color = staticmethod(ansi_with_color)
+        
+        # Force nocolor to False in case script auto-detects TTY
+        dsh.options['nocolor'] = False
 
     # The official script prints headers and info to stdout.
     # We capture everything and then try to find the JSON part.
     
     output_buffer = io.StringIO()
+    # Mock isatty to return True so the script thinks it's in a terminal
+    output_buffer.isatty = lambda: True
+    
     original_stdout = sys.stdout
     sys.stdout = output_buffer
     
