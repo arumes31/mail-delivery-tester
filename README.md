@@ -4,6 +4,8 @@
 [![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://github.com/arumes31/mail-delivery-tester/pkgs/container/mail-delivery-tester)
 ![Python Version](https://img.shields.io/badge/python-3.14-blue.svg)
 ![License](https://img.shields.io/github/license/arumes31/mail-delivery-tester)
+![Repo Size](https://img.shields.io/github/repo-size/arumes31/mail-delivery-tester)
+[![Security Scan](https://github.com/arumes31/mail-delivery-tester/actions/workflows/security-scan.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/security-scan.yml)
 
 <p align="center">
   <img src="static/img/logo.svg" width="120" alt="MailDT Logo">
