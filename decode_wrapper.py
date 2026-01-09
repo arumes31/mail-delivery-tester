@@ -54,6 +54,20 @@ if __name__ == '__main__':
     
     full_output = output_buffer.getvalue()
     
+    # Check if JSON format was requested
+    json_requested = False
+    if '-f' in sys.argv:
+        try:
+            f_index = sys.argv.index('-f')
+            if f_index + 1 < len(sys.argv) and sys.argv[f_index + 1] == 'json':
+                json_requested = True
+        except ValueError:
+            pass
+
+    if not json_requested:
+        print(full_output)
+        sys.exit(0)
+
     # Try to find the JSON block in the output
     # It usually starts with { and ends with }
     try:

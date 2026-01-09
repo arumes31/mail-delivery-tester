@@ -1107,6 +1107,8 @@ def api_decode_spam():
     record_usage('decode-spam')
 
     try:
+        legacy = request.json.get('legacy', False)
+
         # 1. Create a temporary file for the headers
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp:
             tmp.write(raw_headers)
@@ -1114,7 +1116,9 @@ def api_decode_spam():
 
         # 2. Run the wrapper script via subprocess
         # The wrapper patches a bug in the mgeeky script that causes crashes on certain headers
-        cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', '-r', tmp_path]
+        cmd = [sys.executable, 'decode_wrapper.py', '-r', tmp_path]
+        if not legacy:
+            cmd.extend(['-f', 'json'])
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
@@ -1126,6 +1130,9 @@ def api_decode_spam():
             # Try to see if it's because of missing dependencies or actual script error
             error_msg = result.stderr if result.stderr else "Script execution failed"
             return jsonify({'error': f'Decoder error: {error_msg}'}), 500
+
+        if legacy:
+            return jsonify({'legacy_output': result.stdout, 'remaining_quota': remaining})
 
         # 4. Parse JSON output
         try:
