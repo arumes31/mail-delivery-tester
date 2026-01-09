@@ -4,3 +4,4 @@ redis-data/dump.rdb
 .env
 data/
 data-web/
+test_headers.txt
