@@ -142,15 +142,22 @@
                        .replace(/"/g, "&quot;")
                        .replace(/'/g, "&#039;");
         
-        // Handle colors (convert __COLOR_XX__ markers to spans)
-        // 31: Red, 32: Green, 33: Yellow, 34: Blue, 35: Magenta, 36: Cyan, 37: White, 38: Grey
-        html = html.replace(/__COLOR_31__\|(.*?)\|__END_COLOR__/g, '<span class="text-danger fw-bold">$1</span>');
-        html = html.replace(/__COLOR_32__\|(.*?)\|__END_COLOR__/g, '<span class="text-success fw-bold">$1</span>');
-        html = html.replace(/__COLOR_33__\|(.*?)\|__END_COLOR__/g, '<span class="text-warning fw-bold">$1</span>');
-        html = html.replace(/__COLOR_34__\|(.*?)\|__END_COLOR__/g, '<span class="text-primary fw-bold">$1</span>');
-        html = html.replace(/__COLOR_35__\|(.*?)\|__END_COLOR__/g, '<span class="text-info fw-bold">$1</span>'); // Map magenta to info for better visibility or custom class
-        html = html.replace(/__COLOR_36__\|(.*?)\|__END_COLOR__/g, '<span class="text-info fw-bold">$1</span>');
-        html = html.replace(/__COLOR_\d+__\|(.*?)\|__END_COLOR__/g, '$1'); // Strip others
+        // Handle ANSI colors
+        html = html.replace(/\033\[31m/g, '<span class="text-danger fw-bold">');
+        html = html.replace(/\033\[32m/g, '<span class="text-success fw-bold">');
+        html = html.replace(/\033\[33m/g, '<span class="text-warning fw-bold">');
+        html = html.replace(/\033\[34m/g, '<span class="text-primary fw-bold">');
+        html = html.replace(/\033\[35m/g, '<span class="text-info fw-bold">'); 
+        html = html.replace(/\033\[36m/g, '<span class="text-info fw-bold">');
+        html = html.replace(/\033\[37m/g, '<span class="text-white">');
+        html = html.replace(/\033\[38m/g, '<span class="text-secondary">');
+        html = html.replace(/\033\[90m/g, '<span class="text-secondary">');
+        
+        // Reset code
+        html = html.replace(/\033\[0m/g, '</span>');
+
+        // Clean up any other ANSI codes
+        html = html.replace(/\033\[\d+(?:;\d+)*m/g, '');
 
         const col = document.createElement('div');
         col.className = 'col-12';

@@ -38,6 +38,22 @@ def patched_replaceColors(s, colorizingFunc):
 dsh.Logger.replaceColors = staticmethod(patched_replaceColors)
 
 if __name__ == '__main__':
+    # Check if JSON format was requested
+    json_requested = False
+    if '-f' in sys.argv:
+        try:
+            f_index = sys.argv.index('-f')
+            if f_index + 1 < len(sys.argv) and sys.argv[f_index + 1] == 'json':
+                json_requested = True
+        except ValueError:
+            pass
+
+    # If NOT JSON (Legacy mode), patch with_color to return ANSI codes
+    if not json_requested:
+        def ansi_with_color(c, s):
+            return f"\033[{c}m{s}\033[0m"
+        dsh.Logger.with_color = staticmethod(ansi_with_color)
+
     # The official script prints headers and info to stdout.
     # We capture everything and then try to find the JSON part.
     
@@ -54,16 +70,6 @@ if __name__ == '__main__':
     
     full_output = output_buffer.getvalue()
     
-    # Check if JSON format was requested
-    json_requested = False
-    if '-f' in sys.argv:
-        try:
-            f_index = sys.argv.index('-f')
-            if f_index + 1 < len(sys.argv) and sys.argv[f_index + 1] == 'json':
-                json_requested = True
-        except ValueError:
-            pass
-
     if not json_requested:
         print(full_output)
         sys.exit(0)
