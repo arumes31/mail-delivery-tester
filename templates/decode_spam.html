@@ -142,22 +142,22 @@
                        .replace(/"/g, "&quot;")
                        .replace(/'/g, "&#039;");
         
-        // Handle ANSI colors
-        html = html.replace(/\033\[31m/g, '<span class="text-danger fw-bold">');
-        html = html.replace(/\033\[32m/g, '<span class="text-success fw-bold">');
-        html = html.replace(/\033\[33m/g, '<span class="text-warning fw-bold">');
-        html = html.replace(/\033\[34m/g, '<span class="text-primary fw-bold">');
-        html = html.replace(/\033\[35m/g, '<span class="text-info fw-bold">'); 
-        html = html.replace(/\033\[36m/g, '<span class="text-info fw-bold">');
-        html = html.replace(/\033\[37m/g, '<span class="text-white">');
-        html = html.replace(/\033\[38m/g, '<span class="text-secondary">');
-        html = html.replace(/\033\[90m/g, '<span class="text-secondary">');
+        // Handle ANSI colors using \x1b for ESC
+        html = html.replace(/\x1b\[31m/g, '<span class="text-danger fw-bold">');
+        html = html.replace(/\x1b\[32m/g, '<span class="text-success fw-bold">');
+        html = html.replace(/\x1b\[33m/g, '<span class="text-warning fw-bold">');
+        html = html.replace(/\x1b\[34m/g, '<span class="text-primary fw-bold">');
+        html = html.replace(/\x1b\[35m/g, '<span class="text-info fw-bold">'); 
+        html = html.replace(/\x1b\[36m/g, '<span class="text-info fw-bold">');
+        html = html.replace(/\x1b\[37m/g, '<span class="text-white">');
+        html = html.replace(/\x1b\[38m/g, '<span class="text-secondary">');
+        html = html.replace(/\x1b\[90m/g, '<span class="text-secondary">');
         
         // Reset code
-        html = html.replace(/\033\[0m/g, '</span>');
+        html = html.replace(/\x1b\[0m/g, '</span>');
 
         // Clean up any other ANSI codes
-        html = html.replace(/\033\[\d+(?:;\d+)*m/g, '');
+        html = html.replace(/\x1b\[\d+(?:;\d+)*m/g, '');
 
         const col = document.createElement('div');
         col.className = 'col-12';
@@ -217,13 +217,17 @@
             
             let analysisHtml = item.analysis.replace(/\n/g, '<br>');
             
-            analysisHtml = analysisHtml.replace(/__COLOR_31__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-danger shadow-sm border border-danger fw-bold px-2 py-1">$1</span>');
-            analysisHtml = analysisHtml.replace(/__COLOR_32__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-success shadow-sm border border-success fw-bold px-2 py-1">$1</span>');
-            analysisHtml = analysisHtml.replace(/__COLOR_33__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-warning text-dark shadow-sm border border-warning fw-bold px-2 py-1">$1</span>');
-            analysisHtml = analysisHtml.replace(/__COLOR_36__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-info text-dark shadow-sm border border-info fw-bold px-2 py-1">$1</span>');
-            analysisHtml = analysisHtml.replace(/__COLOR_34__\|(.*?)\|__END_COLOR__/g, '<span class="badge bg-primary shadow-sm border border-primary fw-bold px-2 py-1">$1</span>');
+            // Use [\s\S]*? to match across lines and include all color codes
+            analysisHtml = analysisHtml.replace(/__COLOR_31__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-danger shadow-sm border border-danger fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_32__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-success shadow-sm border border-success fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_33__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-warning text-dark shadow-sm border border-warning fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_34__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-primary shadow-sm border border-primary fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_35__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-info text-dark shadow-sm border border-info fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_36__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-info text-dark shadow-sm border border-info fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_37__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-light text-dark shadow-sm border border-light fw-bold px-2 py-1">$1</span>');
+            analysisHtml = analysisHtml.replace(/__COLOR_38__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-secondary shadow-sm border border-secondary fw-bold px-2 py-1">$1</span>');
             
-            analysisHtml = analysisHtml.replace(/__COLOR_\d+__\|(.*?)\|__END_COLOR__/g, '<strong class="text-white">$1</strong>');
+            analysisHtml = analysisHtml.replace(/__COLOR_\d+__\|([\s\S]*?)\|__END_COLOR__/g, '<strong class="text-white">$1</strong>');
 
             col.innerHTML = `
                 <div class="card h-100 shadow-sm border-0">
