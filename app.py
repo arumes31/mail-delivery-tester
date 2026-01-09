@@ -22,6 +22,7 @@ from email.mime.text import MIMEText
 from email.header import decode_header
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, desc
 from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
 
@@ -1626,7 +1627,7 @@ def api_widgets():
             if 'icon_file' in request.files:
                 file = request.files['icon_file']
                 if file and file.filename:
-                    filename = f"{uuid.uuid4()}_{file.filename}"
+                    filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
                     file.save(os.path.join(UPLOAD_FOLDER, filename))
                     image_path = f"/custom_icons/{filename}"
 
@@ -1711,7 +1712,7 @@ def api_widget_detail(w_id):
                 if 'icon_file' in request.files:
                     file = request.files['icon_file']
                     if file and file.filename:
-                        filename = f"{uuid.uuid4()}_{file.filename}"
+                        filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
                         file.save(os.path.join(UPLOAD_FOLDER, filename))
                         widget.image_path = f"/custom_icons/{filename}"
 
