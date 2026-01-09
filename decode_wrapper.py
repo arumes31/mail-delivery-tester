@@ -17,14 +17,20 @@ def patched_replaceColors(s, colorizingFunc):
         if s[pos:].startswith('__COLOR_'):
             pos += len('__COLOR_')
             pos1 = s[pos:].find('__|')
-            if pos1 == -1: break
+            if pos1 == -1: 
+                pos += 1
+                continue
             c_code = s[pos:pos+pos1]
             try:
                 c = int(c_code)
-            except ValueError: break
+            except ValueError: 
+                pos += 1
+                continue
             pos += pos1 + len('__|')
             pos2 = s[pos:].find('|__END_COLOR__')
-            if pos2 == -1: break
+            if pos2 == -1: 
+                pos += 1
+                continue
             txt = s[pos:pos+pos2]
             pos += pos2 + len('|__END_COLOR__')
             patt = f'__COLOR_{c}__|{txt}|__END_COLOR__'
@@ -37,9 +43,20 @@ def patched_replaceColors(s, colorizingFunc):
 
 dsh.Logger.replaceColors = staticmethod(patched_replaceColors)
 
+# Monkey-patch colorizeOutput to preserve markers in JSON format
+def patched_colorizeOutput(out, headers):
+    if dsh.options['format'] == 'html':
+        out = dsh.Logger.htmlColors(out)
+        return dsh.formatToHtml(out, headers)
+    if dsh.options['format'] == 'text':
+        out = dsh.Logger.ansiColors(out)
+    # For JSON, do NOT call noColors. Return 'out' with markers for frontend parsing.
+    return out
+
+dsh.colorizeOutput = patched_colorizeOutput
+
 if __name__ == '__main__':
-    # The official script prints headers and info to stdout.
-    # We capture everything and then try to find the JSON part.
+    # This wrapper is now used primarily for JSON output extraction and bug fixes.
     
     output_buffer = io.StringIO()
     original_stdout = sys.stdout
@@ -55,7 +72,6 @@ if __name__ == '__main__':
     full_output = output_buffer.getvalue()
     
     # Try to find the JSON block in the output
-    # It usually starts with { and ends with }
     try:
         start_idx = full_output.find('{')
         end_idx = full_output.rfind('}')
