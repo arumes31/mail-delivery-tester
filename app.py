@@ -1114,13 +1114,15 @@ def api_decode_spam():
             tmp.write(raw_headers)
             tmp_path = tmp.name
 
-        # 2. Run the wrapper script via subprocess
-        # The wrapper patches a bug in the mgeeky script that causes crashes on certain headers
-        cmd = [sys.executable, 'decode_wrapper.py', '-r', tmp_path]
-        if not legacy:
-            cmd.extend(['-f', 'json'])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        # 2. Run the decoder
+        if legacy:
+            # Run the official script directly, without wrapper
+            cmd = [sys.executable, 'decode_spam_headers_official.py', '-r', tmp_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        else:
+            # Run via wrapper for modern JSON output with bug fixes
+            cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', '-r', tmp_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
         # 3. Clean up temp file
         if os.path.exists(tmp_path):

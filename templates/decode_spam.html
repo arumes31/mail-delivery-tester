@@ -142,22 +142,47 @@
                        .replace(/"/g, "&quot;")
                        .replace(/'/g, "&#039;");
         
-        // Handle ANSI colors using \x1b for ESC
-        html = html.replace(/\x1b\[31m/g, '<span class="text-danger fw-bold">');
-        html = html.replace(/\x1b\[32m/g, '<span class="text-success fw-bold">');
-        html = html.replace(/\x1b\[33m/g, '<span class="text-warning fw-bold">');
-        html = html.replace(/\x1b\[34m/g, '<span class="text-primary fw-bold">');
-        html = html.replace(/\x1b\[35m/g, '<span class="text-info fw-bold">'); 
-        html = html.replace(/\x1b\[36m/g, '<span class="text-info fw-bold">');
-        html = html.replace(/\x1b\[37m/g, '<span class="text-white">');
-        html = html.replace(/\x1b\[38m/g, '<span class="text-secondary">');
-        html = html.replace(/\x1b\[90m/g, '<span class="text-secondary">');
-        
-        // Reset code
-        html = html.replace(/\x1b\[0m/g, '</span>');
+        // Handle ANSI colors using \x1b or \u001b for ESC
+        const ansiColorMap = {
+            '31': 'text-danger fw-bold',
+            '32': 'text-success fw-bold',
+            '33': 'text-warning fw-bold',
+            '34': 'text-primary fw-bold',
+            '35': 'text-info fw-bold',
+            '36': 'text-info fw-bold',
+            '37': 'text-white',
+            '38': 'text-secondary',
+            '90': 'text-secondary',
+            '91': 'text-danger fw-bold',
+            '92': 'text-success fw-bold',
+            '93': 'text-warning fw-bold',
+            '94': 'text-primary fw-bold',
+            '95': 'text-info fw-bold',
+            '96': 'text-info fw-bold',
+            '97': 'text-white'
+        };
 
-        // Clean up any other ANSI codes
-        html = html.replace(/\x1b\[\d+(?:;\d+)*m/g, '');
+        html = html.replace(/(\x1b|\u001b)\[(\d+(?:;\d+)*)m/g, (match, esc, codeStr) => {
+            if (codeStr === '0') return '</span>';
+            const codes = codeStr.split(';');
+            let cls = '';
+            for (const c of codes) {
+                if (ansiColorMap[c]) cls = ansiColorMap[c];
+            }
+            if (cls) return `<span class="${cls}">`;
+            return '';
+        });
+
+        // Handle markers as fallback/modern bypass
+        html = html.replace(/__COLOR_31__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-danger fw-bold">$1</span>');
+        html = html.replace(/__COLOR_32__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-success fw-bold">$1</span>');
+        html = html.replace(/__COLOR_33__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-warning fw-bold">$1</span>');
+        html = html.replace(/__COLOR_34__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-primary fw-bold">$1</span>');
+        html = html.replace(/__COLOR_35__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-info fw-bold">$1</span>');
+        html = html.replace(/__COLOR_36__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-info fw-bold">$1</span>');
+        html = html.replace(/__COLOR_37__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-white">$1</span>');
+        html = html.replace(/__COLOR_38__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="text-secondary">$1</span>');
+        html = html.replace(/__COLOR_\d+__\|([\s\S]*?)\|__END_COLOR__/g, '$1');
 
         const col = document.createElement('div');
         col.className = 'col-12';
