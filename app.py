@@ -1116,8 +1116,14 @@ def api_decode_spam():
 
         # 2. Run the decoder
         if legacy:
-            # Run the official script directly, without wrapper
-            cmd = [sys.executable, 'decode_spam_headers_official.py', '-r', tmp_path]
+            # Run the official script directly, forcing TTY to preserve colors (colorama strips them otherwise)
+            cmd = [
+                sys.executable, '-c',
+                "import sys; sys.stdout.isatty = lambda: True; "
+                "import decode_spam_headers_official; "
+                "decode_spam_headers_official.main(sys.argv[1:])",
+                '-r', tmp_path
+            ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         else:
             # Run via wrapper for modern JSON output with bug fixes
