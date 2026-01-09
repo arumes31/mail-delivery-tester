@@ -2,9 +2,14 @@
 
 {% block content %}
 <div class="row">
-    <div class="col-md-12 mb-4">
-        <h2><i class="fa-solid fa-flask me-2"></i>Mail Tester</h2>
-        <p class="text-muted">Test your email delivery, SPF, DKIM, and DMARC settings by sending an email to this system.</p>
+    <div class="col-md-12 mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h2><i class="fa-solid fa-flask me-2"></i>Mail Tester</h2>
+            <p class="text-muted mb-0">Test your email delivery, SPF, DKIM, and DMARC settings by sending an email to this system.</p>
+        </div>
+        <a href="/" class="btn btn-outline-secondary">
+            <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
+        </a>
     </div>
 </div>
 
@@ -41,7 +46,7 @@
                 </div>
             </div>
             <div class="card-footer bg-light small" style="color: #000 !important; font-weight: 500;">
-                <i class="fa-solid fa-circle-info me-1 text-primary"></i> The system polls for new mail every minute.
+                <i class="fa-solid fa-circle-info me-1 text-primary"></i> The system polls for new mail every 5 seconds when a test is active.
             </div>
         </div>
 
