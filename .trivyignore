@@ -1,0 +1,2 @@
+# Ignore kernel headers package as containers use the host kernel
+linux-libc-dev
