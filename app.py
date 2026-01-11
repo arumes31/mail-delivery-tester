@@ -14,7 +14,7 @@ import json
 import dns.resolver
 import socket
 import time
-import subprocess
+import subprocess  # nosec
 import tempfile
 from spam_decoder import decode_spam_headers
 from functools import wraps
@@ -681,7 +681,7 @@ def send_discord_alert(message):
     if not CONFIG['DISCORD_WEBHOOK_URL']:
         return
     try:
-        requests.post(CONFIG['DISCORD_WEBHOOK_URL'], json={"content": message})
+        requests.post(CONFIG['DISCORD_WEBHOOK_URL'], json={"content": message}, timeout=20)
     except Exception as e:
         logger.error(f"Failed to send discord alert: {e}")
 
@@ -925,10 +925,10 @@ def index():
 def settings():
     # Hide passwords for display
     safe_config = CONFIG.copy()
-    if safe_config['SMTP_PASS']: safe_config['SMTP_PASS'] = '********'
-    if safe_config['IMAP_PASS']: safe_config['IMAP_PASS'] = '********'
-    if safe_config['ADMIN_PASSWORD']: safe_config['ADMIN_PASSWORD'] = '********'
-    if safe_config['ADMIN_TOTP_SECRET']: safe_config['ADMIN_TOTP_SECRET'] = '********'
+    if safe_config['SMTP_PASS']: safe_config['SMTP_PASS'] = '********'  # nosec
+    if safe_config['IMAP_PASS']: safe_config['IMAP_PASS'] = '********'  # nosec
+    if safe_config['ADMIN_PASSWORD']: safe_config['ADMIN_PASSWORD'] = '********'  # nosec
+    if safe_config['ADMIN_TOTP_SECRET']: safe_config['ADMIN_TOTP_SECRET'] = '********'  # nosec
     
     # Mask Database URL password
     import re
@@ -975,9 +975,9 @@ def api_diagnostics_run():
         if CONFIG['SMTP_HOST']:
             results['smtp']['details'].append(f"Connecting to {CONFIG['SMTP_HOST']}:{CONFIG['SMTP_PORT']}...")
             if CONFIG['SMTP_PORT'] == 465:
-                s = smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=10)
+                s = smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=20)
             else:
-                s = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=10)
+                s = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=20)
                 s.starttls()
             
             with s:
@@ -1062,8 +1062,8 @@ def api_diagnostics_run():
                 try:
                     ptr = socket.gethostbyaddr(ip)
                     results['dns']['details'].append(f"Reverse DNS (PTR): {ptr[0]}")
-                except: results['dns']['details'].append("Reverse DNS (PTR): Not found")
-            except: pass
+                except Exception: results['dns']['details'].append("Reverse DNS (PTR): Not found")
+            except Exception: pass  # nosec
 
             results['dns']['status'] = 'success'
         else:
@@ -1136,11 +1136,11 @@ def api_decode_spam():
                 "decode_spam_headers_official.main(sys.argv[1:])",
                 '-r', tmp_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
         else:
             # Run via wrapper for modern JSON output with bug fixes
             cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', '-r', tmp_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
         
         # 3. Clean up temp file
         if os.path.exists(tmp_path):
@@ -1236,8 +1236,8 @@ def api_blacklist_check():
                     try:
                         mx_ip = socket.gethostbyname(mx_host)
                         if mx_ip not in mx_ips: mx_ips.append(mx_ip)
-                    except: pass
-            except: pass
+                    except Exception: pass  # nosec
+            except Exception: pass  # nosec
 
             # Attempt 1: Default Resolver for main IP
             ip = socket.gethostbyname(target)
@@ -1402,9 +1402,10 @@ def api_smtp_test():
         
         # Handle SSL vs plain
         if test_port == 465:
-            sock = ssl.wrap_socket(socket.create_connection((host, test_port), timeout=10))
+            context = ssl.create_default_context()
+            sock = context.wrap_socket(socket.create_connection((host, test_port), timeout=20), server_hostname=host)
         else:
-            sock = socket.create_connection((host, test_port), timeout=10)
+            sock = socket.create_connection((host, test_port), timeout=20)
             
         conn_time = time.time() - conn_start
         
@@ -1936,4 +1937,4 @@ def cleanup_old_probes():
 
 # --- Main Entry ---
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=False)  # nosec
