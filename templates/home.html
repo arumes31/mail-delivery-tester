@@ -118,9 +118,17 @@
     </div>
 </div>
 
-<div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="custom-widgets-list">
+<div class="row g-3" id="custom-widgets-list">
     {% for widget in custom_widgets %}
-    <div class="col" id="widget-col-{{ widget.id }}" data-id="{{ widget.id }}">
+    {% set col_class = 'col-6 col-md-4 col-lg-3 col-xl-2' %}
+    {% if widget.size == 'mini' %}
+        {% set col_class = 'col-4 col-md-3 col-lg-2 col-xl-1' %}
+    {% elif widget.size == 'medium' %}
+        {% set col_class = 'col-12 col-md-8 col-lg-6 col-xl-4' %}
+    {% elif widget.size == 'large' %}
+        {% set col_class = 'col-12 col-md-12 col-lg-9 col-xl-6' %}
+    {% endif %}
+    <div class="{{ col_class }}" id="widget-col-{{ widget.id }}" data-id="{{ widget.id }}">
         <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative" style="background: {{ widget.color }}15 !important; border-top: 2px solid {{ widget.color }} !important;">
             {% if session.logged_in %}
             <div class="position-absolute top-0 end-0 p-1 d-flex" style="z-index: 5;">
@@ -185,7 +193,16 @@
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label small fw-bold">Size</label>
+                            <select class="form-select bg-dark border-secondary text-white" id="w-size">
+                                <option value="mini">Mini (1/8)</option>
+                                <option value="small">Small (1/6)</option>
+                                <option value="medium">Medium (1/3)</option>
+                                <option value="large">Large (1/2)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
                             <label class="form-label small fw-bold">Icon</label>
                             <select class="form-select bg-dark border-secondary text-white" id="w-icon">
                                 <option value="fa-link">Link</option>
@@ -202,7 +219,7 @@
                                 <option value="fa-cloud">Cloud</option>
                             </select>
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label small fw-bold">Theme Color</label>
                             <input type="color" class="form-control form-control-color bg-dark border-secondary w-100" id="w-color" value="#8a2be2">
                         </div>
@@ -327,6 +344,7 @@
         document.getElementById('w-title').value = '';
         document.getElementById('w-url').value = '';
         document.getElementById('w-icon').value = 'fa-link';
+        document.getElementById('w-size').value = 'small';
         document.getElementById('w-color').value = '#8a2be2';
         document.getElementById('w-private').checked = false;
         document.getElementById('modalTitle').innerText = 'Add Pin';
@@ -338,6 +356,7 @@
         document.getElementById('w-title').value = widget.title;
         document.getElementById('w-url').value = widget.url;
         document.getElementById('w-icon').value = widget.icon;
+        document.getElementById('w-size').value = widget.size || 'small';
         document.getElementById('w-color').value = widget.color;
         document.getElementById('w-private').checked = widget.is_private;
         document.getElementById('modalTitle').innerText = 'Edit Pin';
@@ -350,6 +369,7 @@
         form.append('title', document.getElementById('w-title').value);
         form.append('url', document.getElementById('w-url').value);
         form.append('icon', document.getElementById('w-icon').value);
+        form.append('size', document.getElementById('w-size').value);
         form.append('color', document.getElementById('w-color').value);
         form.append('is_private', document.getElementById('w-private').checked);
         

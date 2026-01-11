@@ -184,6 +184,7 @@ class CustomWidget(Base):
     image_path = Column(String(255), nullable=True) # Path to uploaded image
     is_private = Column(Boolean, default=False)
     color = Column(String(20), default='#8a2be2')
+    size = Column(String(20), default='small') # mini, small, medium, large
     order = Column(Integer, default=0)
 
 # --- Migration Helpers ---
@@ -261,6 +262,15 @@ def run_migrations():
             logger.info("Migrating: Adding is_private to custom_widgets")
             session.execute(text("ALTER TABLE custom_widgets ADD COLUMN is_private BOOLEAN DEFAULT FALSE"))
             session.commit()
+
+        try:
+            session.execute(text("SELECT size FROM custom_widgets LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding size to custom_widgets")
+            session.execute(text("ALTER TABLE custom_widgets ADD COLUMN size VARCHAR(20) DEFAULT 'small'"))
+            session.commit()
+
 
         # Alert Active state tracking
         try:
@@ -899,6 +909,7 @@ def home_page():
             'image_path': w.image_path,
             'is_private': w.is_private,
             'color': w.color,
+            'size': w.size,
             'order': w.order
         } for w in custom_widgets]
         return render_template('home.html', custom_widgets=widgets_data)
@@ -1608,7 +1619,7 @@ def api_widgets():
         if request.method == 'GET':
             widgets = session_db.query(CustomWidget).order_by(CustomWidget.order).all()
             return jsonify([{
-                'id': w.id, 'title': w.title, 'url': w.url, 'icon': w.icon, 'image_path': w.image_path, 'color': w.color, 'order': w.order
+                'id': w.id, 'title': w.title, 'url': w.url, 'icon': w.icon, 'image_path': w.image_path, 'color': w.color, 'size': w.size, 'order': w.order
             } for w in widgets])
         
         elif request.method == 'POST':
@@ -1618,6 +1629,7 @@ def api_widgets():
             icon = request.form.get('icon', 'fa-link')
             if not icon: icon = 'fa-link' # Fallback
             color = request.form.get('color', '#8a2be2')
+            size = request.form.get('size', 'small')
             is_private = request.form.get('is_private', 'false').lower() == 'true'
             
             if not title or not url:
@@ -1638,6 +1650,7 @@ def api_widgets():
                 image_path=image_path,
                 is_private=is_private,
                 color=color,
+                size=size,
                 order=0
             )
             session_db.add(new_w)
@@ -1699,6 +1712,7 @@ def api_widget_detail(w_id):
                 widget.url = data.get('url', widget.url)
                 widget.icon = data.get('icon', widget.icon)
                 widget.color = data.get('color', widget.color)
+                widget.size = data.get('size', widget.size)
                 widget.is_private = data.get('is_private', widget.is_private)
                 widget.order = data.get('order', widget.order)
             else:
@@ -1706,6 +1720,7 @@ def api_widget_detail(w_id):
                 widget.url = request.form.get('url', widget.url)
                 widget.icon = request.form.get('icon', widget.icon)
                 widget.color = request.form.get('color', widget.color)
+                widget.size = request.form.get('size', widget.size)
                 if 'is_private' in request.form:
                     widget.is_private = request.form.get('is_private').lower() == 'true'
                 
