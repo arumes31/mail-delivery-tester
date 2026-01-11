@@ -1935,6 +1935,9 @@ def cleanup_old_probes():
     finally:
         session_db.close()
 
+# Ensure migrations run on app startup (e.g. for Gunicorn workers)
+run_migrations()
+
 # --- Main Entry ---
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)  # nosec
