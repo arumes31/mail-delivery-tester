@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 def get_engine(url, max_retries=5, delay=5):
     for i in range(max_retries):
         try:
-            e = create_engine(url)
+            e = create_engine(url, pool_pre_ping=True, pool_recycle=300)
             # Try to connect to verify
             with e.connect() as conn:
                 return e
