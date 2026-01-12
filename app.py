@@ -37,12 +37,10 @@ def get_env_var(name, default=None, var_type=str):
     return var_type(val)
 
 # Ensure data directory exists for persistence
-if not os.path.exists('data'):
-    os.makedirs('data')
+os.makedirs('data', exist_ok=True)
 
 UPLOAD_FOLDER = os.path.join('data-web', 'custom_icons')
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Construct default Database URL from components
 db_user = get_env_var('DB_USER', 'maildt')
