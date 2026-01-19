@@ -2,6 +2,7 @@ import os
 import logging
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.executors.pool import ThreadPoolExecutor
 from app import (
     CONFIG, logger, run_migrations, reset_alert_states,
     send_probe_email, check_inbox, check_delays, cleanup_old_probes
@@ -21,11 +22,15 @@ reset_alert_states()
 
 # Setup Scheduler
 # We use BackgroundScheduler here because Gunicorn will own the main process/thread
-scheduler = BackgroundScheduler(job_defaults={
-    'coalesce': False,
-    'max_instances': 3,
-    'misfire_grace_time': 60
-})
+# Increased thread pool and instance limits to support 500+ recipients
+scheduler = BackgroundScheduler(
+    executors={'default': ThreadPoolExecutor(50)},
+    job_defaults={
+        'coalesce': False,
+        'max_instances': 10,
+        'misfire_grace_time': 600
+    }
+)
 
 # Add jobs if config is present
 if CONFIG['SMTP_HOST']:
