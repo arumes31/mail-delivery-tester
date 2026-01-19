@@ -641,7 +641,7 @@ def check_inbox():
                                             increment_counter('dmarc_fail', session_provided=session)
 
                                         # CW Auth Alerts
-                                        if recipient:
+                                        if recipient and recipient.cw_alerts_enabled:
                                             # SPF Alert
                                             if recipient.cw_spf_alert and probe.spf_status != 'pass':
                                                 cw_msg = f"⚠️ **SPF Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.spf_status}\nAuth-Results: {auth_results}"
