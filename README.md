@@ -40,6 +40,16 @@ MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify
     - **Performance**: Intelligent 120s caching for public users with real-time bypass for admins.
 - **Security**: **2FA (TOTP)** support for admin access and IP-based rate limiting across all diagnostic tools.
 
+## Screenshots
+
+<img width="2543" height="689" alt="grafik" src="https://github.com/user-attachments/assets/1a2c5631-4385-490a-8baf-512dd6262f99" />
+<img width="2519" height="1013" alt="grafik" src="https://github.com/user-attachments/assets/9c6a109e-d20b-471b-9e57-8364f17d5c3b" />
+<img width="2519" height="1220" alt="grafik" src="https://github.com/user-attachments/assets/cd2d1402-62cc-4f85-b9c7-25b2609d1ecf" />
+<img width="2521" height="1250" alt="grafik" src="https://github.com/user-attachments/assets/b81a3dfe-6cad-428b-82d9-97a65eac6dfa" />
+<img width="2553" height="1259" alt="grafik" src="https://github.com/user-attachments/assets/b7e6605b-d462-4594-b79b-47fb296cfe34" />
+<img width="2523" height="609" alt="grafik" src="https://github.com/user-attachments/assets/e9cc48d7-c34a-4dbd-8eaf-f70688693a7e" />#
+<img width="2529" height="873" alt="grafik" src="https://github.com/user-attachments/assets/bbc51734-e3b7-4212-8de0-6931961e0828" />
+
 ## 🛠️ Setup & Installation
 
 ### 1. Prerequisites
