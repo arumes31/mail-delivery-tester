@@ -101,6 +101,21 @@
                         </div>
                     </div>
                 </div>
+                <!-- CW Auth Options -->
+                <div id="cwAuthOptionsContainer" class="d-flex gap-3 mt-2 ps-3 border-start border-3 border-info" style="display: none !important;">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="cwSpfAlertInput">
+                        <label class="form-check-label small" for="cwSpfAlertInput">SPF Alert</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="cwDkimAlertInput">
+                        <label class="form-check-label small" for="cwDkimAlertInput">DKIM Alert</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="cwDmarcAlertInput">
+                        <label class="form-check-label small" for="cwDmarcAlertInput">DMARC Alert</label>
+                    </div>
+                </div>
             </div>
             <div class="col-md-1 d-flex align-items-center pt-3">
                 <button type="submit" class="btn btn-primary w-100">
@@ -126,7 +141,7 @@
                         <th class="text-center">Active</th>
                         <th class="text-center">Email</th>
                         <th class="text-center">Discord</th>
-                        <th class="text-center" style="width: 180px;">Connectwise Ticketing</th>
+                        <th class="text-center" style="width: 280px;">Connectwise Ticketing</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
@@ -145,9 +160,15 @@
         if (id === 'add') {
             const checked = document.getElementById('cwAlertsInput').checked;
             document.getElementById('cwCompanyIdContainer').style.visibility = checked ? 'visible' : 'hidden';
+            const authOpts = document.getElementById('cwAuthOptionsContainer');
+            if(checked) authOpts.style.removeProperty('display');
+            else authOpts.style.display = 'none';
         } else {
             const checked = document.getElementById(`cw-alerts-${id}`).checked;
             document.getElementById(`cw-company-container-${id}`).style.visibility = checked ? 'visible' : 'hidden';
+            const authOpts = document.getElementById(`cw-auth-options-${id}`);
+            if(checked) authOpts.style.removeProperty('display');
+            else authOpts.style.display = 'none';
         }
     }
 
@@ -206,12 +227,25 @@
                                 </div>
                             </td>
                             <td>
-                                <div class="d-flex align-items-center justify-content-center gap-2">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''} onchange="toggleCWDisplay(${r.id})">
+                                <div class="d-flex flex-column align-items-center">
+                                    <div class="d-flex align-items-center justify-content-center gap-2 mb-1">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''} onchange="toggleCWDisplay(${r.id})">
+                                        </div>
+                                        <div id="cw-company-container-${r.id}" style="width: 80px; visibility: ${r.cw_alerts_enabled ? 'visible' : 'hidden'}">
+                                            <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                        </div>
                                     </div>
-                                    <div id="cw-company-container-${r.id}" style="width: 80px; visibility: ${r.cw_alerts_enabled ? 'visible' : 'hidden'}">
-                                        <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                    <div id="cw-auth-options-${r.id}" class="d-flex gap-2 small text-muted" style="${r.cw_alerts_enabled ? '' : 'display: none;'}">
+                                        <div class="form-check p-0 m-0" title="SPF Alert">
+                                            <input class="form-check-input m-0" type="checkbox" id="cw-spf-${r.id}" ${r.cw_spf_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">SPF</span>
+                                        </div>
+                                        <div class="form-check p-0 m-0" title="DKIM Alert">
+                                            <input class="form-check-input m-0" type="checkbox" id="cw-dkim-${r.id}" ${r.cw_dkim_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">DKIM</span>
+                                        </div>
+                                        <div class="form-check p-0 m-0" title="DMARC Alert">
+                                            <input class="form-check-input m-0" type="checkbox" id="cw-dmarc-${r.id}" ${r.cw_dmarc_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">DMARC</span>
+                                        </div>
                                     </div>
                                 </div>
                             </td>
@@ -265,6 +299,10 @@
         const discordAlerts = document.getElementById('discordAlertsInput').checked;
         const cwAlerts = document.getElementById('cwAlertsInput').checked;
         
+        const cwSpf = document.getElementById('cwSpfAlertInput').checked;
+        const cwDkim = document.getElementById('cwDkimAlertInput').checked;
+        const cwDmarc = document.getElementById('cwDmarcAlertInput').checked;
+
         fetch('/api/recipients', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -275,7 +313,10 @@
                 cw_company_id: companyId,
                 email_alerts_enabled: emailAlerts,
                 discord_alerts_enabled: discordAlerts,
-                cw_alerts_enabled: cwAlerts
+                cw_alerts_enabled: cwAlerts,
+                cw_spf_alert: cwSpf,
+                cw_dkim_alert: cwDkim,
+                cw_dmarc_alert: cwDmarc
             })
         }).then(res => {
             if (res.ok) {
@@ -296,6 +337,10 @@
         const emailAlerts = document.getElementById(`email-alerts-${id}`).checked;
         const discordAlerts = document.getElementById(`discord-alerts-${id}`).checked;
         const cwAlerts = document.getElementById(`cw-alerts-${id}`).checked;
+        
+        const cwSpf = document.getElementById(`cw-spf-${id}`).checked;
+        const cwDkim = document.getElementById(`cw-dkim-${id}`).checked;
+        const cwDmarc = document.getElementById(`cw-dmarc-${id}`).checked;
 
         fetch(`/api/recipients/${id}`, {
             method: 'PUT',
@@ -307,7 +352,10 @@
                 active: active,
                 email_alerts_enabled: emailAlerts,
                 discord_alerts_enabled: discordAlerts,
-                cw_alerts_enabled: cwAlerts
+                cw_alerts_enabled: cwAlerts,
+                cw_spf_alert: cwSpf,
+                cw_dkim_alert: cwDkim,
+                cw_dmarc_alert: cwDmarc
             })
         }).then(res => {
             if(res.ok) {

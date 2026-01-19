@@ -142,6 +142,9 @@ class Recipient(Base):
     discord_alerts_enabled = Column(Boolean, default=True)
     cw_alerts_enabled = Column(Boolean, default=False)
     cw_company_id = Column(Integer, default=CONFIG['CW_DEFAULT_COMPANY_ID'])
+    cw_spf_alert = Column(Boolean, default=False)
+    cw_dkim_alert = Column(Boolean, default=False)
+    cw_dmarc_alert = Column(Boolean, default=False)
     alert_active = Column(Boolean, default=False)
 
 class MailTest(Base):
@@ -261,6 +264,16 @@ def run_migrations():
             logger.info("Migrating: Adding cw_alerts_enabled and cw_company_id to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN cw_alerts_enabled BOOLEAN DEFAULT FALSE"))
             session.execute(text(f"ALTER TABLE recipients ADD COLUMN cw_company_id INTEGER DEFAULT {CONFIG['CW_DEFAULT_COMPANY_ID']}"))
+            session.commit()
+        
+        try:
+            session.execute(text("SELECT cw_spf_alert FROM recipients LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding cw auth alert columns to recipients")
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_spf_alert BOOLEAN DEFAULT FALSE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dkim_alert BOOLEAN DEFAULT FALSE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dmarc_alert BOOLEAN DEFAULT FALSE"))
             session.commit()
 
         try:
@@ -624,6 +637,23 @@ def check_inbox():
                                             increment_counter('dkim_fail', session_provided=session)
                                         if probe.dmarc_status == 'fail':
                                             increment_counter('dmarc_fail', session_provided=session)
+
+                                        # CW Auth Alerts
+                                        if recipient:
+                                            # SPF Alert
+                                            if recipient.cw_spf_alert and probe.spf_status != 'pass':
+                                                cw_msg = f"⚠️ **SPF Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.spf_status}\nAuth-Results: {auth_results}"
+                                                send_cw_ticket(recipient.email, f"Mail Delivery SPF Alert - {recipient.email}", cw_msg, recipient.cw_company_id)
+                                            
+                                            # DKIM Alert
+                                            if recipient.cw_dkim_alert and probe.dkim_status != 'pass':
+                                                cw_msg = f"⚠️ **DKIM Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.dkim_status}\nAuth-Results: {auth_results}"
+                                                send_cw_ticket(recipient.email, f"Mail Delivery DKIM Alert - {recipient.email}", cw_msg, recipient.cw_company_id)
+                                                
+                                            # DMARC Alert
+                                            if recipient.cw_dmarc_alert and probe.dmarc_status != 'pass':
+                                                cw_msg = f"⚠️ **DMARC Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.dmarc_status}\nAuth-Results: {auth_results}"
+                                                send_cw_ticket(recipient.email, f"Mail Delivery DMARC Alert - {recipient.email}", cw_msg, recipient.cw_company_id)
 
                                         probe.status = 'RECEIVED'
                                         increment_counter('mail_received', session_provided=session)
@@ -1671,7 +1701,10 @@ def api_recipients():
                 'email_alerts_enabled': r.email_alerts_enabled,
                 'discord_alerts_enabled': r.discord_alerts_enabled,
                 'cw_alerts_enabled': r.cw_alerts_enabled,
-                'cw_company_id': r.cw_company_id
+                'cw_company_id': r.cw_company_id,
+                'cw_spf_alert': r.cw_spf_alert,
+                'cw_dkim_alert': r.cw_dkim_alert,
+                'cw_dmarc_alert': r.cw_dmarc_alert
             } for r in recipients])
             
         elif request.method == 'POST':
@@ -1691,7 +1724,10 @@ def api_recipients():
                 email_alerts_enabled=bool(data.get('email_alerts_enabled', True)),
                 discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True)),
                 cw_alerts_enabled=bool(data.get('cw_alerts_enabled', False)),
-                cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID']))
+                cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID'])),
+                cw_spf_alert=bool(data.get('cw_spf_alert', False)),
+                cw_dkim_alert=bool(data.get('cw_dkim_alert', False)),
+                cw_dmarc_alert=bool(data.get('cw_dmarc_alert', False))
             )
             session.add(new_r)
             session.commit()
@@ -1745,6 +1781,12 @@ def update_recipient(r_id):
             r.cw_alerts_enabled = bool(data['cw_alerts_enabled'])
         if 'cw_company_id' in data:
             r.cw_company_id = int(data['cw_company_id'])
+        if 'cw_spf_alert' in data:
+            r.cw_spf_alert = bool(data['cw_spf_alert'])
+        if 'cw_dkim_alert' in data:
+            r.cw_dkim_alert = bool(data['cw_dkim_alert'])
+        if 'cw_dmarc_alert' in data:
+            r.cw_dmarc_alert = bool(data['cw_dmarc_alert'])
             
         session.commit()
         return jsonify({'message': 'Updated'})
