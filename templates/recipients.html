@@ -59,7 +59,7 @@
     </div>
     <div class="card-body">
         <form id="add-form" class="row g-3">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label for="emailInput" class="form-label fw-bold">Email Address</label>
                 <div class="input-group">
                     <span class="input-group-text"><i class="fa-solid fa-envelope"></i></span>
@@ -72,7 +72,6 @@
                     <input type="number" class="form-control" id="intervalInput" value="3600" min="30" required>
                     <span class="input-group-text">sec</span>
                 </div>
-                <div class="form-text">Time between probes</div>
             </div>
             <div class="col-md-2">
                 <label for="thresholdInput" class="form-label fw-bold">Threshold</label>
@@ -80,22 +79,32 @@
                     <input type="number" class="form-control" id="thresholdInput" value="300" min="10" required>
                     <span class="input-group-text">sec</span>
                 </div>
-                <div class="form-text">Alert after delay</div>
             </div>
-             <div class="col-md-2">
+             <div class="col-md-4">
                 <label class="form-label fw-bold d-block">Alert Channels</label>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="emailAlertsInput" checked>
-                    <label class="form-check-label" for="emailAlertsInput"><i class="fa-solid fa-envelope me-1"></i> Email</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="discordAlertsInput">
-                    <label class="form-check-label" for="discordAlertsInput"><i class="fa-solid fa-brands fa-discord me-1"></i> Discord</label>
+                <div class="d-flex align-items-center gap-3 pt-1">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="emailAlertsInput" checked>
+                        <label class="form-check-label" for="emailAlertsInput"><i class="fa-solid fa-envelope me-1"></i> Email</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="discordAlertsInput">
+                        <label class="form-check-label" for="discordAlertsInput"><i class="fa-solid fa-brands fa-discord me-1"></i> Discord</label>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="cwAlertsInput" onchange="toggleCWDisplay('add')">
+                            <label class="form-check-label" for="cwAlertsInput"><i class="fa-solid fa-ticket me-1"></i> Connectwise</label>
+                        </div>
+                        <div id="cwCompanyIdContainer" style="width: 90px; visibility: hidden;">
+                            <input type="number" class="form-control form-control-sm" id="cwCompanyIdInput" value="250" placeholder="Co. ID" title="Company ID">
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="col-md-2 d-flex align-items-center pt-3">
+            <div class="col-md-1 d-flex align-items-center pt-3">
                 <button type="submit" class="btn btn-primary w-100">
-                    <i class="fa-solid fa-plus me-1"></i> Add
+                    <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
         </form>
@@ -112,11 +121,12 @@
                 <thead class="table-light">
                     <tr>
                         <th>Email</th>
-                        <th style="width: 120px;">Interval (s)</th>
-                        <th style="width: 120px;">Threshold (s)</th>
+                        <th style="width: 100px;">Interval (s)</th>
+                        <th style="width: 100px;">Threshold (s)</th>
                         <th class="text-center">Active</th>
                         <th class="text-center">Email</th>
                         <th class="text-center">Discord</th>
+                        <th class="text-center" style="width: 180px;">Connectwise Ticketing</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
@@ -131,6 +141,16 @@
 
 {% block scripts %}
 <script>
+    function toggleCWDisplay(id) {
+        if (id === 'add') {
+            const checked = document.getElementById('cwAlertsInput').checked;
+            document.getElementById('cwCompanyIdContainer').style.visibility = checked ? 'visible' : 'hidden';
+        } else {
+            const checked = document.getElementById(`cw-alerts-${id}`).checked;
+            document.getElementById(`cw-company-container-${id}`).style.visibility = checked ? 'visible' : 'hidden';
+        }
+    }
+
     function updateSchedulerStatus() {
         const badge = document.getElementById('schedulerStatusBadge');
         fetch('/api/scheduler/health')
@@ -157,7 +177,7 @@
                 const tbody = document.getElementById('recipients-list');
                 tbody.innerHTML = '';
                 if (data.length === 0) {
-                     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No recipients configured. Add one above.</td></tr>';
+                     tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No recipients configured. Add one above.</td></tr>';
                      return;
                 }
                 data.forEach(r => {
@@ -185,6 +205,16 @@
                                     <input class="form-check-input" type="checkbox" id="discord-alerts-${r.id}" ${r.discord_alerts_enabled ? 'checked' : ''}>
                                 </div>
                             </td>
+                            <td>
+                                <div class="d-flex align-items-center justify-content-center gap-2">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''} onchange="toggleCWDisplay(${r.id})">
+                                    </div>
+                                    <div id="cw-company-container-${r.id}" style="width: 80px; visibility: ${r.cw_alerts_enabled ? 'visible' : 'hidden'}">
+                                        <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                    </div>
+                                </div>
+                            </td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-success me-1" onclick="saveRecipient(${r.id})" title="Save Changes">
                                     <i class="fa-solid fa-save"></i>
@@ -196,6 +226,8 @@
                         </tr>
                     `;
                 });
+                // Initialize add form visibility
+                toggleCWDisplay('add');
             });
     }
 
@@ -228,8 +260,10 @@
         const email = document.getElementById('emailInput').value;
         const interval = document.getElementById('intervalInput').value;
         const threshold = document.getElementById('thresholdInput').value;
+        const companyId = document.getElementById('cwCompanyIdInput').value;
         const emailAlerts = document.getElementById('emailAlertsInput').checked;
         const discordAlerts = document.getElementById('discordAlertsInput').checked;
+        const cwAlerts = document.getElementById('cwAlertsInput').checked;
         
         fetch('/api/recipients', {
             method: 'POST',
@@ -238,8 +272,10 @@
                 email: email,
                 send_interval: interval,
                 alert_threshold: threshold,
+                cw_company_id: companyId,
                 email_alerts_enabled: emailAlerts,
-                discord_alerts_enabled: discordAlerts
+                discord_alerts_enabled: discordAlerts,
+                cw_alerts_enabled: cwAlerts
             })
         }).then(res => {
             if (res.ok) {
@@ -255,9 +291,11 @@
     function saveRecipient(id) {
         const interval = document.getElementById(`interval-${id}`).value;
         const threshold = document.getElementById(`threshold-${id}`).value;
+        const companyId = document.getElementById(`cw-company-${id}`).value;
         const active = document.getElementById(`active-${id}`).checked;
         const emailAlerts = document.getElementById(`email-alerts-${id}`).checked;
         const discordAlerts = document.getElementById(`discord-alerts-${id}`).checked;
+        const cwAlerts = document.getElementById(`cw-alerts-${id}`).checked;
 
         fetch(`/api/recipients/${id}`, {
             method: 'PUT',
@@ -265,9 +303,11 @@
             body: JSON.stringify({
                 send_interval: interval,
                 alert_threshold: threshold,
+                cw_company_id: companyId,
                 active: active,
                 email_alerts_enabled: emailAlerts,
-                discord_alerts_enabled: discordAlerts
+                discord_alerts_enabled: discordAlerts,
+                cw_alerts_enabled: cwAlerts
             })
         }).then(res => {
             if(res.ok) {

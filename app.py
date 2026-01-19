@@ -9,6 +9,7 @@ import email
 import logging
 import requests
 import datetime
+import base64
 import pyotp
 import json
 import dns.resolver
@@ -73,6 +74,12 @@ CONFIG = {
     'WHOIS_URL': get_env_var('WHOIS_URL', 'https://whois.reitetschlaeger.com'),
     'ENABLE_WEBCHECK': get_env_var('ENABLE_WEBCHECK', 'true', bool),
     'WEBCHECK_URL': get_env_var('WEBCHECK_URL', 'https://webcheck-512351112734521.reitetschlaeger.com/'),
+    'CW_COMPANY': get_env_var('CW_COMPANY'),
+    'CW_PUBLIC_KEY': get_env_var('CW_PUBLIC_KEY'),
+    'CW_PRIVATE_KEY': get_env_var('CW_PRIVATE_KEY'),
+    'CW_CLIENT_ID': get_env_var('CW_CLIENT_ID'),
+    'CW_URL': get_env_var('CW_URL', 'https://psa.eworx.at/v4_6_release/apis/3.0'),
+    'CW_DEFAULT_COMPANY_ID': get_env_var('CW_DEFAULT_COMPANY_ID', 250, int),
 }
 
 # --- Setup Logging ---
@@ -133,6 +140,8 @@ class Recipient(Base):
     next_send_at = Column(DateTime, default=datetime.datetime.utcnow)
     email_alerts_enabled = Column(Boolean, default=True)
     discord_alerts_enabled = Column(Boolean, default=True)
+    cw_alerts_enabled = Column(Boolean, default=False)
+    cw_company_id = Column(Integer, default=CONFIG['CW_DEFAULT_COMPANY_ID'])
     alert_active = Column(Boolean, default=False)
 
 class MailTest(Base):
@@ -243,6 +252,15 @@ def run_migrations():
             logger.info("Migrating: Adding granular alert columns to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN email_alerts_enabled BOOLEAN DEFAULT TRUE"))
             session.execute(text("ALTER TABLE recipients ADD COLUMN discord_alerts_enabled BOOLEAN DEFAULT TRUE"))
+            session.commit()
+
+        try:
+            session.execute(text("SELECT cw_alerts_enabled FROM recipients LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding cw_alerts_enabled and cw_company_id to recipients")
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_alerts_enabled BOOLEAN DEFAULT FALSE"))
+            session.execute(text(f"ALTER TABLE recipients ADD COLUMN cw_company_id INTEGER DEFAULT {CONFIG['CW_DEFAULT_COMPANY_ID']}"))
             session.commit()
 
         try:
@@ -468,6 +486,10 @@ def send_probe_email():
                             msg_rec = f"✅ **Mail Send Recovered**\nSuccessfully sent probe to `{recipient.email}` after previous failure."
                             if recipient.discord_alerts_enabled:
                                 send_discord_alert(msg_rec)
+                            if recipient.email_alerts_enabled:
+                                send_email_alert(msg_rec)
+                            if recipient.cw_alerts_enabled:
+                                send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", msg_rec, recipient.cw_company_id, close_ticket=True)
                             recipient.alert_active = False
                     
                     # Update next send time
@@ -496,6 +518,8 @@ def send_probe_email():
                             send_discord_alert(err_msg)
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
+                        if recipient.cw_alerts_enabled:
+                            send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", err_msg, recipient.cw_company_id)
                         recipient.alert_active = True
                     
                     # Still update next send time
@@ -585,6 +609,7 @@ def check_inbox():
                                             msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
+                                            if recipient.cw_alerts_enabled: send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", msg_rec, recipient.cw_company_id, close_ticket=True)
                                             recipient.alert_active = False
                                         
                                         # Extract Auth Results
@@ -749,6 +774,113 @@ def send_email_alert(message):
     except Exception as e:
         logger.error(f"[DEBUG] Failed to send email alert: {e}")
 
+def send_cw_ticket(recipient_email, subject, description, company_id_val, close_ticket=False):
+    """Creates or updates a ConnectWise ticket."""
+    if not CONFIG['CW_COMPANY'] or not CONFIG['CW_PUBLIC_KEY'] or not CONFIG['CW_PRIVATE_KEY'] or not CONFIG['CW_CLIENT_ID']:
+        logger.warning("ConnectWise config missing. Skipping ticket creation.")
+        return
+
+    # Use default company ID if not provided (though model default is set from config)
+    if not company_id_val:
+        company_id_val = CONFIG['CW_DEFAULT_COMPANY_ID']
+
+    # Auth Setup
+    auth_string = f"{CONFIG['CW_COMPANY']}+{CONFIG['CW_PUBLIC_KEY']}:{CONFIG['CW_PRIVATE_KEY']}"
+    base64_auth = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+    
+    headers = {
+        "Authorization": f"Basic {base64_auth}",
+        "clientId": CONFIG['CW_CLIENT_ID'],
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    # API Endpoints
+    base_url = CONFIG['CW_URL']
+    tickets_url = f"{base_url}/service/tickets"
+    
+    # Static Board ID from requirements
+    board_id = 38
+    
+    try:
+        # 1. Check for existing open ticket
+        # Filtering by summary, board, company and ensure not closed
+        params = {
+            "conditions": f'summary="{subject}" and board/id={board_id} and company/id={company_id_val} and closedFlag=false',
+            "orderBy": "id desc"
+        }
+        
+        logger.info(f"CW: Checking for existing ticket: '{subject}' for company {company_id_val}")
+        search_response = requests.get(tickets_url, headers=headers, params=params)
+        search_response.raise_for_status()
+        existing_tickets = search_response.json()
+        
+        if existing_tickets:
+            ticket_id = existing_tickets[0]['id']
+            logger.info(f"CW: Found existing ticket #{ticket_id}. Adding note.")
+            
+            # 2. Add note
+            notes_url = f"{tickets_url}/{ticket_id}/notes"
+            note_body = {
+                "text": f"Update: {description}",
+                "detailDescriptionFlag": True,
+                "internalAnalysisFlag": False,
+                "customerUpdatedFlag": False
+            }
+            requests.post(notes_url, headers=headers, json=note_body).raise_for_status()
+            logger.info(f"CW: Note added to ticket #{ticket_id}.")
+            
+            # 3. Close if requested
+            if close_ticket:
+                # Standard JSON Patch for ConnectWise REST API
+                patch_headers = headers.copy()
+                patch_headers["Content-Type"] = "application/json-patch+json"
+                
+                patch_body = [
+                    {
+                        "op": "replace",
+                        "path": "status",
+                        "value": {"name": "Closed"}
+                    }
+                ]
+                
+                logger.info(f"CW: Attempting to close ticket #{ticket_id}...")
+                close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=patch_headers, json=patch_body)
+                
+                if not close_resp.ok:
+                    # Fallback: Some CW versions might accept simple object PATCH
+                    logger.warning(f"CW: JSON Patch failed ({close_resp.status_code}), trying simple object update...")
+                    close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=headers, json={"status": {"name": "Closed"}})
+                
+                if not close_resp.ok:
+                    logger.warning(f"CW: Failed to close ticket #{ticket_id}: {close_resp.text}")
+                else:
+                    logger.info(f"CW: Ticket #{ticket_id} closed.")
+
+        else:
+            if not close_ticket:
+                # 4. Create new ticket only if we are not trying to close a non-existent one
+                logger.info("CW: No existing ticket. Creating new.")
+                new_ticket_body = {
+                    "summary": subject,
+                    "board": {"id": board_id},
+                    "company": {"id": company_id_val},
+                    "initialDescription": description
+                }
+                create_response = requests.post(tickets_url, headers=headers, json=new_ticket_body)
+                create_response.raise_for_status()
+                result = create_response.json()
+                logger.info(f"CW: Created ticket #{result.get('id')}.")
+            else:
+                logger.info("CW: Close requested but no open ticket found. Skipping creation.")
+
+    except Exception as e:
+        logger.error(f"CW Error: {e}")
+        try:
+             if hasattr(e, 'response') and e.response:
+                 logger.error(f"CW API Response: {e.response.text}")
+        except: pass
+
 def check_delays():
     """Checks for emails sent > their specific alert_threshold ago that haven't arrived."""
     session = Session()
@@ -788,6 +920,9 @@ def check_delays():
                         
                         if recipient.email_alerts_enabled:
                             send_email_alert(msg)
+                        
+                        if recipient.cw_alerts_enabled:
+                            send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", msg, recipient.cw_company_id)
                         
                         increment_counter('alert_sent', session_provided=session)
                         recipient.alert_active = True
@@ -1534,7 +1669,9 @@ def api_recipients():
                 'send_interval': r.send_interval,
                 'alert_threshold': r.alert_threshold,
                 'email_alerts_enabled': r.email_alerts_enabled,
-                'discord_alerts_enabled': r.discord_alerts_enabled
+                'discord_alerts_enabled': r.discord_alerts_enabled,
+                'cw_alerts_enabled': r.cw_alerts_enabled,
+                'cw_company_id': r.cw_company_id
             } for r in recipients])
             
         elif request.method == 'POST':
@@ -1552,7 +1689,9 @@ def api_recipients():
                 send_interval=int(data.get('send_interval', 3600)),
                 alert_threshold=int(data.get('alert_threshold', 300)),
                 email_alerts_enabled=bool(data.get('email_alerts_enabled', True)),
-                discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True))
+                discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True)),
+                cw_alerts_enabled=bool(data.get('cw_alerts_enabled', False)),
+                cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID']))
             )
             session.add(new_r)
             session.commit()
@@ -1602,6 +1741,10 @@ def update_recipient(r_id):
             r.email_alerts_enabled = bool(data['email_alerts_enabled'])
         if 'discord_alerts_enabled' in data:
             r.discord_alerts_enabled = bool(data['discord_alerts_enabled'])
+        if 'cw_alerts_enabled' in data:
+            r.cw_alerts_enabled = bool(data['cw_alerts_enabled'])
+        if 'cw_company_id' in data:
+            r.cw_company_id = int(data['cw_company_id'])
             
         session.commit()
         return jsonify({'message': 'Updated'})
