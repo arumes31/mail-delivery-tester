@@ -641,7 +641,7 @@ def check_inbox():
                                             increment_counter('dmarc_fail', session_provided=session)
 
                                         # CW Auth Alerts
-                                        if recipient:
+                                        if recipient and recipient.cw_alerts_enabled:
                                             # SPF Alert
                                             if recipient.cw_spf_alert and probe.spf_status != 'pass':
                                                 cw_msg = f"⚠️ **SPF Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.spf_status}\nAuth-Results: {auth_results}"
@@ -852,7 +852,7 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
         }
         
         logger.info(f"CW: Checking for existing ticket: '{subject}' for company {company_id_val}")
-        search_response = requests.get(tickets_url, headers=headers, params=params)
+        search_response = requests.get(tickets_url, headers=headers, params=params, timeout=10)
         search_response.raise_for_status()
         existing_tickets = search_response.json()
         
@@ -868,7 +868,7 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
                 "internalAnalysisFlag": False,
                 "customerUpdatedFlag": False
             }
-            requests.post(notes_url, headers=headers, json=note_body).raise_for_status()
+            requests.post(notes_url, headers=headers, json=note_body, timeout=10).raise_for_status()
             logger.info(f"CW: Note added to ticket #{ticket_id}.")
             
             # 3. Close if requested
@@ -886,12 +886,12 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
                 ]
                 
                 logger.info(f"CW: Attempting to close ticket #{ticket_id}...")
-                close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=patch_headers, json=patch_body)
+                close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=patch_headers, json=patch_body, timeout=10)
                 
                 if not close_resp.ok:
                     # Fallback: Some CW versions might accept simple object PATCH
                     logger.warning(f"CW: JSON Patch failed ({close_resp.status_code}), trying simple object update...")
-                    close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=headers, json={"status": {"name": "Closed"}})
+                    close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=headers, json={"status": {"name": "Closed"}}, timeout=10)
                 
                 if not close_resp.ok:
                     logger.warning(f"CW: Failed to close ticket #{ticket_id}: {close_resp.text}")
@@ -908,7 +908,7 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
                     "company": {"id": company_id_val},
                     "initialDescription": description
                 }
-                create_response = requests.post(tickets_url, headers=headers, json=new_ticket_body)
+                create_response = requests.post(tickets_url, headers=headers, json=new_ticket_body, timeout=10)
                 create_response.raise_for_status()
                 result = create_response.json()
                 logger.info(f"CW: Created ticket #{result.get('id')}.")
