@@ -1751,41 +1751,6 @@ def api_cw_companies():
         logger.error(f"CW Company Search Error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/cw/companies')
-@login_required
-def api_cw_companies():
-    headers = get_cw_headers()
-    if not headers:
-        return jsonify({'error': 'ConnectWise not configured'}), 503
-
-    search = request.args.get('search', '').strip()
-    if not search:
-        return jsonify([])
-
-    try:
-        base_url = CONFIG['CW_URL']
-        companies_url = f"{base_url}/company/companies"
-        
-        # Search by name or identifier
-        # CW API Syntax: conditions=name like "search%"
-        # We'll use wildcard match
-        conditions = f'(name like "%{search}%" OR identifier like "%{search}%") AND deletedFlag=false'
-        
-        params = {
-            "conditions": conditions,
-            "orderBy": "name asc",
-            "pageSize": 20,
-            "fields": "id,name,identifier" # Fetch only needed fields
-        }
-        
-        response = requests.get(companies_url, headers=headers, params=params, timeout=10)
-        response.raise_for_status()
-        
-        return jsonify(response.json())
-    except Exception as e:
-        logger.error(f"CW Company Search Error: {e}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recipients', methods=['GET', 'POST'])
 @login_required
 def api_recipients():

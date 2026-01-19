@@ -129,7 +129,7 @@
                     </div>
                     <div class="d-flex align-items-center gap-2">
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="cwAlertsInput" onchange="toggleCWDisplay('add')">
+                            <input class="form-check-input" type="checkbox" id="cwAlertsInput" onchange="handleCWToggleAdd()">
                             <label class="form-check-label" for="cwAlertsInput"><i class="fa-solid fa-ticket me-1"></i> Connectwise</label>
                         </div>
                         <div id="cwCompanyIdContainer" style="visibility: hidden;" class="d-flex gap-1">
@@ -195,28 +195,55 @@
 
 {% block scripts %}
 <script>
+    function handleCWToggleAdd() {
+        const cb = document.getElementById('cwAlertsInput');
+        if (!cb) return;
+        const checked = cb.checked;
+        
+        // When enabling, default the auth alert checkboxes to checked
+        if (checked) {
+            const spf = document.getElementById('cwSpfAlertInput');
+            const dkim = document.getElementById('cwDkimAlertInput');
+            const dmarc = document.getElementById('cwDmarcAlertInput');
+            if (spf) spf.checked = true;
+            if (dkim) dkim.checked = true;
+            if (dmarc) dmarc.checked = true;
+        }
+        
+        toggleCWDisplay('add');
+    }
+
     function toggleCWDisplay(id) {
         if (id === 'add') {
-            const checked = document.getElementById('cwAlertsInput').checked;
-            document.getElementById('cwCompanyIdContainer').style.visibility = checked ? 'visible' : 'hidden';
+            const cb = document.getElementById('cwAlertsInput');
+            if (!cb) return;
+            const checked = cb.checked;
+            const container = document.getElementById('cwCompanyIdContainer');
+            if (container) container.style.visibility = checked ? 'visible' : 'hidden';
+            
             const authOpts = document.getElementById('cwAuthOptionsContainer');
-            if(checked) {
-                authOpts.style.setProperty('display', 'flex', 'important');
-                // Ensure they are checked when enabling
-                document.getElementById('cwSpfAlertInput').checked = true;
-                document.getElementById('cwDkimAlertInput').checked = true;
-                document.getElementById('cwDmarcAlertInput').checked = true;
-            } else {
-                authOpts.style.setProperty('display', 'none', 'important');
+            if (authOpts) {
+                if(checked) {
+                    authOpts.style.setProperty('display', 'flex', 'important');
+                } else {
+                    authOpts.style.setProperty('display', 'none', 'important');
+                }
             }
         } else {
-            const checked = document.getElementById(`cw-alerts-${id}`).checked;
-            document.getElementById(`cw-company-container-${id}`).style.visibility = checked ? 'visible' : 'hidden';
+            const cb = document.getElementById(`cw-alerts-${id}`);
+            if (!cb) return;
+            const checked = cb.checked;
+            
+            const container = document.getElementById(`cw-company-container-${id}`);
+            if (container) container.style.visibility = checked ? 'visible' : 'hidden';
+            
             const authOpts = document.getElementById(`cw-auth-options-${id}`);
-            if(checked) {
-                authOpts.style.setProperty('display', 'flex', 'important');
-            } else {
-                authOpts.style.setProperty('display', 'none', 'important');
+            if (authOpts) {
+                if(checked) {
+                    authOpts.style.setProperty('display', 'flex', 'important');
+                } else {
+                    authOpts.style.setProperty('display', 'none', 'important');
+                }
             }
         }
     }
@@ -251,7 +278,7 @@
                      return;
                 }
                 data.forEach(r => {
-                    tbody.innerHTML += `
+                    const rowHtml = `
                         <tr id="row-${r.id}">
                             <td class="fw-bold">${r.email}</td>
                             <td>
@@ -311,10 +338,14 @@
                             </td>
                         </tr>
                     `;
+                    tbody.insertAdjacentHTML('beforeend', rowHtml);
+                    // Ensure visibility is correctly initialized for the new row
+                    toggleCWDisplay(r.id);
                 });
                 // Initialize add form visibility
                 toggleCWDisplay('add');
             });
+    }
     }
 
     let recipientIdToDelete = null;
