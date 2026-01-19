@@ -13,6 +13,9 @@
             <p class="text-muted mb-0">Configure target email addresses and their individual monitoring schedules.</p>
         </div>
         <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" onclick="openCompanySearch('header')" title="Query ConnectWise Company IDs">
+                <i class="fa-solid fa-building-magnifying-glass me-1"></i> Search CW Company
+            </button>
             <a href="/settings" class="btn btn-outline-info">
                 <i class="fa-solid fa-gears me-1"></i> System Settings
             </a>
@@ -48,6 +51,39 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete Permanently</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ConnectWise Company Search Modal -->
+<div class="modal fade" id="companySearchModal" tabindex="-1" aria-labelledby="companySearchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content shadow-lg border-info">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title" id="companySearchModalLabel"><i class="fa-solid fa-building me-2"></i>Search ConnectWise Company</h5>
+                <button type="button" class="btn-close btn-close-white shadow-none" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group mb-3">
+                    <input type="text" id="companySearchInput" class="form-control" placeholder="Search by name or identifier..." aria-label="Search company">
+                    <button class="btn btn-primary" type="button" id="btnRunCompanySearch"><i class="fa-solid fa-magnifying-glass me-1"></i> Search</button>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                    <table class="table table-sm table-hover align-middle">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Identifier</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="companySearchResults">
+                            <tr><td colspan="4" class="text-center py-4 text-muted">Enter search term and click Search</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -93,12 +129,30 @@
                     </div>
                     <div class="d-flex align-items-center gap-2">
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="cwAlertsInput" onchange="toggleCWDisplay('add')">
+                            <input class="form-check-input" type="checkbox" id="cwAlertsInput" onchange="handleCWToggleAdd()">
                             <label class="form-check-label" for="cwAlertsInput"><i class="fa-solid fa-ticket me-1"></i> Connectwise</label>
                         </div>
-                        <div id="cwCompanyIdContainer" style="width: 90px; visibility: hidden;">
-                            <input type="number" class="form-control form-control-sm" id="cwCompanyIdInput" value="250" placeholder="Co. ID" title="Company ID">
+                        <div id="cwCompanyIdContainer" style="visibility: hidden;" class="d-flex gap-1">
+                            <div class="input-group input-group-sm" style="width: 130px;">
+                                <input type="number" class="form-control" id="cwCompanyIdInput" value="250" placeholder="Co. ID" title="Company ID">
+                                <button class="btn btn-outline-secondary" type="button" onclick="openCompanySearch('add')" title="Search Company"><i class="fa-solid fa-magnifying-glass"></i></button>
+                            </div>
                         </div>
+                    </div>
+                </div>
+                <!-- CW Auth Options -->
+                <div id="cwAuthOptionsContainer" class="d-flex gap-3 mt-2 ps-3 border-start border-3 border-info" style="display: none !important;">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="cwSpfAlertInput" checked>
+                        <label class="form-check-label small" for="cwSpfAlertInput">SPF Alert</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="cwDkimAlertInput" checked>
+                        <label class="form-check-label small" for="cwDkimAlertInput">DKIM Alert</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="cwDmarcAlertInput" checked>
+                        <label class="form-check-label small" for="cwDmarcAlertInput">DMARC Alert</label>
                     </div>
                 </div>
             </div>
@@ -126,7 +180,7 @@
                         <th class="text-center">Active</th>
                         <th class="text-center">Email</th>
                         <th class="text-center">Discord</th>
-                        <th class="text-center" style="width: 180px;">Connectwise Ticketing</th>
+                        <th class="text-center" style="width: 280px;">Connectwise Ticketing</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
@@ -141,13 +195,56 @@
 
 {% block scripts %}
 <script>
+    function handleCWToggleAdd() {
+        const cb = document.getElementById('cwAlertsInput');
+        if (!cb) return;
+        const checked = cb.checked;
+        
+        // When enabling, default the auth alert checkboxes to checked
+        if (checked) {
+            const spf = document.getElementById('cwSpfAlertInput');
+            const dkim = document.getElementById('cwDkimAlertInput');
+            const dmarc = document.getElementById('cwDmarcAlertInput');
+            if (spf) spf.checked = true;
+            if (dkim) dkim.checked = true;
+            if (dmarc) dmarc.checked = true;
+        }
+        
+        toggleCWDisplay('add');
+    }
+
     function toggleCWDisplay(id) {
         if (id === 'add') {
-            const checked = document.getElementById('cwAlertsInput').checked;
-            document.getElementById('cwCompanyIdContainer').style.visibility = checked ? 'visible' : 'hidden';
+            const cb = document.getElementById('cwAlertsInput');
+            if (!cb) return;
+            const checked = cb.checked;
+            const container = document.getElementById('cwCompanyIdContainer');
+            if (container) container.style.visibility = checked ? 'visible' : 'hidden';
+            
+            const authOpts = document.getElementById('cwAuthOptionsContainer');
+            if (authOpts) {
+                if(checked) {
+                    authOpts.style.setProperty('display', 'flex', 'important');
+                } else {
+                    authOpts.style.setProperty('display', 'none', 'important');
+                }
+            }
         } else {
-            const checked = document.getElementById(`cw-alerts-${id}`).checked;
-            document.getElementById(`cw-company-container-${id}`).style.visibility = checked ? 'visible' : 'hidden';
+            const cb = document.getElementById(`cw-alerts-${id}`);
+            if (!cb) return;
+            const checked = cb.checked;
+            
+            const container = document.getElementById(`cw-company-container-${id}`);
+            if (container) container.style.visibility = checked ? 'visible' : 'hidden';
+            
+            const authOpts = document.getElementById(`cw-auth-options-${id}`);
+            if (authOpts) {
+                if(checked) {
+                    authOpts.style.setProperty('display', 'flex', 'important');
+                } else {
+                    authOpts.style.setProperty('display', 'none', 'important');
+                }
+            }
         }
     }
 
@@ -181,7 +278,7 @@
                      return;
                 }
                 data.forEach(r => {
-                    tbody.innerHTML += `
+                    const rowHtml = `
                         <tr id="row-${r.id}">
                             <td class="fw-bold">${r.email}</td>
                             <td>
@@ -206,12 +303,28 @@
                                 </div>
                             </td>
                             <td>
-                                <div class="d-flex align-items-center justify-content-center gap-2">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''} onchange="toggleCWDisplay(${r.id})">
+                                <div class="d-flex flex-column align-items-center">
+                                    <div class="d-flex align-items-center justify-content-center gap-2 mb-1">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''} onchange="toggleCWDisplay(${r.id})">
+                                        </div>
+                                        <div id="cw-company-container-${r.id}" style="width: 120px; visibility: ${r.cw_alerts_enabled ? 'visible' : 'hidden'}">
+                                            <div class="input-group input-group-sm">
+                                                <input type="number" class="form-control" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                                <button class="btn btn-outline-secondary" type="button" onclick="openCompanySearch(${r.id})" title="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div id="cw-company-container-${r.id}" style="width: 80px; visibility: ${r.cw_alerts_enabled ? 'visible' : 'hidden'}">
-                                        <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                    <div id="cw-auth-options-${r.id}" class="d-flex gap-2 small text-muted" style="${r.cw_alerts_enabled ? 'display: flex !important;' : 'display: none !important;'}">
+                                        <div class="form-check p-0 m-0" title="SPF Alert">
+                                            <input class="form-check-input m-0" type="checkbox" id="cw-spf-${r.id}" ${r.cw_spf_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">SPF</span>
+                                        </div>
+                                        <div class="form-check p-0 m-0" title="DKIM Alert">
+                                            <input class="form-check-input m-0" type="checkbox" id="cw-dkim-${r.id}" ${r.cw_dkim_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">DKIM</span>
+                                        </div>
+                                        <div class="form-check p-0 m-0" title="DMARC Alert">
+                                            <input class="form-check-input m-0" type="checkbox" id="cw-dmarc-${r.id}" ${r.cw_dmarc_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">DMARC</span>
+                                        </div>
                                     </div>
                                 </div>
                             </td>
@@ -225,10 +338,14 @@
                             </td>
                         </tr>
                     `;
+                    tbody.insertAdjacentHTML('beforeend', rowHtml);
+                    // Ensure visibility is correctly initialized for the new row
+                    toggleCWDisplay(r.id);
                 });
                 // Initialize add form visibility
                 toggleCWDisplay('add');
             });
+    }
     }
 
     let recipientIdToDelete = null;
@@ -265,6 +382,10 @@
         const discordAlerts = document.getElementById('discordAlertsInput').checked;
         const cwAlerts = document.getElementById('cwAlertsInput').checked;
         
+        const cwSpf = document.getElementById('cwSpfAlertInput').checked;
+        const cwDkim = document.getElementById('cwDkimAlertInput').checked;
+        const cwDmarc = document.getElementById('cwDmarcAlertInput').checked;
+
         fetch('/api/recipients', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -275,11 +396,19 @@
                 cw_company_id: companyId,
                 email_alerts_enabled: emailAlerts,
                 discord_alerts_enabled: discordAlerts,
-                cw_alerts_enabled: cwAlerts
+                cw_alerts_enabled: cwAlerts,
+                cw_spf_alert: cwSpf,
+                cw_dkim_alert: cwDkim,
+                cw_dmarc_alert: cwDmarc
             })
         }).then(res => {
             if (res.ok) {
                 document.getElementById('emailInput').value = '';
+                // Reset CW checkboxes to checked
+                document.getElementById('cwSpfAlertInput').checked = true;
+                document.getElementById('cwDkimAlertInput').checked = true;
+                document.getElementById('cwDmarcAlertInput').checked = true;
+                
                 showToast('Recipient added successfully.', 'Success');
                 loadRecipients();
             } else {
@@ -296,6 +425,10 @@
         const emailAlerts = document.getElementById(`email-alerts-${id}`).checked;
         const discordAlerts = document.getElementById(`discord-alerts-${id}`).checked;
         const cwAlerts = document.getElementById(`cw-alerts-${id}`).checked;
+        
+        const cwSpf = document.getElementById(`cw-spf-${id}`).checked;
+        const cwDkim = document.getElementById(`cw-dkim-${id}`).checked;
+        const cwDmarc = document.getElementById(`cw-dmarc-${id}`).checked;
 
         fetch(`/api/recipients/${id}`, {
             method: 'PUT',
@@ -307,7 +440,10 @@
                 active: active,
                 email_alerts_enabled: emailAlerts,
                 discord_alerts_enabled: discordAlerts,
-                cw_alerts_enabled: cwAlerts
+                cw_alerts_enabled: cwAlerts,
+                cw_spf_alert: cwSpf,
+                cw_dkim_alert: cwDkim,
+                cw_dmarc_alert: cwDmarc
             })
         }).then(res => {
             if(res.ok) {
@@ -317,6 +453,79 @@
                 showToast('Failed to update recipient.', 'Error');
             }
         });
+    }
+
+    // ConnectWise Company Search Logic
+    let currentSearchTarget = null;
+    const companySearchModal = new bootstrap.Modal(document.getElementById('companySearchModal'));
+
+    function openCompanySearch(target) {
+        currentSearchTarget = target;
+        document.getElementById('companySearchInput').value = '';
+        document.getElementById('companySearchResults').innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">Enter search term and click Search</td></tr>';
+        companySearchModal.show();
+        // Focus input after modal shown
+        setTimeout(() => document.getElementById('companySearchInput').focus(), 500);
+    }
+
+    document.getElementById('btnRunCompanySearch').addEventListener('click', function() {
+        const term = document.getElementById('companySearchInput').value;
+        if (!term) return;
+
+        const tbody = document.getElementById('companySearchResults');
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</td></tr>';
+
+        fetch(`/api/cw/companies?search=${encodeURIComponent(term)}`)
+            .then(res => {
+                if (!res.ok) throw new Error('Search failed');
+                return res.json();
+            })
+            .then(data => {
+                tbody.innerHTML = '';
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">No companies found.</td></tr>';
+                    return;
+                }
+                
+                if (data.error) {
+                     tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-danger">${data.error}</td></tr>`;
+                     return;
+                }
+
+                data.forEach(c => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${c.id}</td>
+                        <td class="fw-bold">${c.name}</td>
+                        <td>${c.identifier}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-primary" onclick="selectCompany(${c.id})">
+                                <i class="fa-solid fa-check"></i> Select
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            })
+            .catch(err => {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-danger">Error: ${err.message}</td></tr>`;
+            });
+    });
+    
+    // Enable enter key for search
+    document.getElementById('companySearchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            document.getElementById('btnRunCompanySearch').click();
+        }
+    });
+
+    function selectCompany(id) {
+        if (currentSearchTarget === 'add') {
+            document.getElementById('cwCompanyIdInput').value = id;
+        } else {
+            document.getElementById(`cw-company-${currentSearchTarget}`).value = id;
+        }
+        companySearchModal.hide();
     }
 
     loadRecipients();

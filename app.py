@@ -142,6 +142,9 @@ class Recipient(Base):
     discord_alerts_enabled = Column(Boolean, default=True)
     cw_alerts_enabled = Column(Boolean, default=False)
     cw_company_id = Column(Integer, default=CONFIG['CW_DEFAULT_COMPANY_ID'])
+    cw_spf_alert = Column(Boolean, default=True)
+    cw_dkim_alert = Column(Boolean, default=True)
+    cw_dmarc_alert = Column(Boolean, default=True)
     alert_active = Column(Boolean, default=False)
 
 class MailTest(Base):
@@ -261,6 +264,18 @@ def run_migrations():
             logger.info("Migrating: Adding cw_alerts_enabled and cw_company_id to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN cw_alerts_enabled BOOLEAN DEFAULT FALSE"))
             session.execute(text(f"ALTER TABLE recipients ADD COLUMN cw_company_id INTEGER DEFAULT {CONFIG['CW_DEFAULT_COMPANY_ID']}"))
+            session.commit()
+        
+        try:
+            session.execute(text("SELECT cw_spf_alert FROM recipients LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding cw auth alert columns to recipients")
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_spf_alert BOOLEAN DEFAULT TRUE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dkim_alert BOOLEAN DEFAULT TRUE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dmarc_alert BOOLEAN DEFAULT TRUE"))
+            # Also update existing rows if any existed before this migration (unlikely but safe)
+            session.execute(text("UPDATE recipients SET cw_spf_alert = TRUE, cw_dkim_alert = TRUE, cw_dmarc_alert = TRUE"))
             session.commit()
 
         try:
@@ -625,6 +640,23 @@ def check_inbox():
                                         if probe.dmarc_status == 'fail':
                                             increment_counter('dmarc_fail', session_provided=session)
 
+                                        # CW Auth Alerts
+                                        if recipient:
+                                            # SPF Alert
+                                            if recipient.cw_spf_alert and probe.spf_status != 'pass':
+                                                cw_msg = f"⚠️ **SPF Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.spf_status}\nAuth-Results: {auth_results}"
+                                                send_cw_ticket(recipient.email, f"Mail Delivery SPF Alert - {recipient.email}", cw_msg, recipient.cw_company_id)
+                                            
+                                            # DKIM Alert
+                                            if recipient.cw_dkim_alert and probe.dkim_status != 'pass':
+                                                cw_msg = f"⚠️ **DKIM Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.dkim_status}\nAuth-Results: {auth_results}"
+                                                send_cw_ticket(recipient.email, f"Mail Delivery DKIM Alert - {recipient.email}", cw_msg, recipient.cw_company_id)
+                                                
+                                            # DMARC Alert
+                                            if recipient.cw_dmarc_alert and probe.dmarc_status != 'pass':
+                                                cw_msg = f"⚠️ **DMARC Check Failed**\nProbe `{probe.guid}` to `{probe.recipient_email}`\nStatus: {probe.dmarc_status}\nAuth-Results: {auth_results}"
+                                                send_cw_ticket(recipient.email, f"Mail Delivery DMARC Alert - {recipient.email}", cw_msg, recipient.cw_company_id)
+
                                         probe.status = 'RECEIVED'
                                         increment_counter('mail_received', session_provided=session)
                                         session.commit()
@@ -774,9 +806,25 @@ def send_email_alert(message):
     except Exception as e:
         logger.error(f"[DEBUG] Failed to send email alert: {e}")
 
+def get_cw_headers():
+    """Returns headers for ConnectWise API calls."""
+    if not CONFIG['CW_COMPANY'] or not CONFIG['CW_PUBLIC_KEY'] or not CONFIG['CW_PRIVATE_KEY'] or not CONFIG['CW_CLIENT_ID']:
+        return None
+
+    auth_string = f"{CONFIG['CW_COMPANY']}+{CONFIG['CW_PUBLIC_KEY']}:{CONFIG['CW_PRIVATE_KEY']}"
+    base64_auth = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+    
+    return {
+        "Authorization": f"Basic {base64_auth}",
+        "clientId": CONFIG['CW_CLIENT_ID'],
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
 def send_cw_ticket(recipient_email, subject, description, company_id_val, close_ticket=False):
     """Creates or updates a ConnectWise ticket."""
-    if not CONFIG['CW_COMPANY'] or not CONFIG['CW_PUBLIC_KEY'] or not CONFIG['CW_PRIVATE_KEY'] or not CONFIG['CW_CLIENT_ID']:
+    headers = get_cw_headers()
+    if not headers:
         logger.warning("ConnectWise config missing. Skipping ticket creation.")
         return
 
@@ -784,17 +832,6 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
     if not company_id_val:
         company_id_val = CONFIG['CW_DEFAULT_COMPANY_ID']
 
-    # Auth Setup
-    auth_string = f"{CONFIG['CW_COMPANY']}+{CONFIG['CW_PUBLIC_KEY']}:{CONFIG['CW_PRIVATE_KEY']}"
-    base64_auth = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
-    
-    headers = {
-        "Authorization": f"Basic {base64_auth}",
-        "clientId": CONFIG['CW_CLIENT_ID'],
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-    
     # API Endpoints
     base_url = CONFIG['CW_URL']
     tickets_url = f"{base_url}/service/tickets"
@@ -947,6 +984,30 @@ def check_delays():
 # --- Flask App ---
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'maildt-default-secret-key-change-me')
+
+_app_initialized = False
+
+@app.before_request
+def initialize_app():
+    """Runs once before the first request to initialize the database."""
+    global _app_initialized
+    if not _app_initialized:
+        logger.info("Initializing application database...")
+        try:
+            run_migrations()
+            # Only reset alert states if we are the main app (not scheduler)
+            if SERVICE_NAME == 'web':
+                reset_alert_states()
+            _app_initialized = True
+            logger.info("Application initialization complete.")
+        except Exception as e:
+            logger.error(f"CRITICAL: Application failed to initialize: {e}")
+            # In a real app we might want to exit, but here we'll let it retry next request
+            # or show errors.
+
+@app.route('/health')
+def health():
+    return {"status": "running"}, 200
 
 @app.context_processor
 def inject_config():
@@ -1655,6 +1716,41 @@ def api_mail_tester_start(test_id):
     logger.info(f"Fast polling signal recorded for test: {test_id}")
     return jsonify({'status': 'started'})
 
+@app.route('/api/cw/companies')
+@login_required
+def api_cw_companies():
+    headers = get_cw_headers()
+    if not headers:
+        return jsonify({'error': 'ConnectWise not configured'}), 503
+
+    search = request.args.get('search', '').strip()
+    if not search:
+        return jsonify([])
+
+    try:
+        base_url = CONFIG['CW_URL']
+        companies_url = f"{base_url}/company/companies"
+        
+        # Search by name or identifier
+        # CW API Syntax: conditions=name like "search%"
+        # We'll use wildcard match
+        conditions = f'(name like "%{search}%" OR identifier like "%{search}%") AND deletedFlag=false'
+        
+        params = {
+            "conditions": conditions,
+            "orderBy": "name asc",
+            "pageSize": 20,
+            "fields": "id,name,identifier" # Fetch only needed fields
+        }
+        
+        response = requests.get(companies_url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        
+        return jsonify(response.json())
+    except Exception as e:
+        logger.error(f"CW Company Search Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recipients', methods=['GET', 'POST'])
 @login_required
 def api_recipients():
@@ -1671,7 +1767,10 @@ def api_recipients():
                 'email_alerts_enabled': r.email_alerts_enabled,
                 'discord_alerts_enabled': r.discord_alerts_enabled,
                 'cw_alerts_enabled': r.cw_alerts_enabled,
-                'cw_company_id': r.cw_company_id
+                'cw_company_id': r.cw_company_id,
+                'cw_spf_alert': r.cw_spf_alert,
+                'cw_dkim_alert': r.cw_dkim_alert,
+                'cw_dmarc_alert': r.cw_dmarc_alert
             } for r in recipients])
             
         elif request.method == 'POST':
@@ -1691,7 +1790,10 @@ def api_recipients():
                 email_alerts_enabled=bool(data.get('email_alerts_enabled', True)),
                 discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True)),
                 cw_alerts_enabled=bool(data.get('cw_alerts_enabled', False)),
-                cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID']))
+                cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID'])),
+                cw_spf_alert=bool(data.get('cw_spf_alert', True)),
+                cw_dkim_alert=bool(data.get('cw_dkim_alert', True)),
+                cw_dmarc_alert=bool(data.get('cw_dmarc_alert', True))
             )
             session.add(new_r)
             session.commit()
@@ -1745,6 +1847,12 @@ def update_recipient(r_id):
             r.cw_alerts_enabled = bool(data['cw_alerts_enabled'])
         if 'cw_company_id' in data:
             r.cw_company_id = int(data['cw_company_id'])
+        if 'cw_spf_alert' in data:
+            r.cw_spf_alert = bool(data['cw_spf_alert'])
+        if 'cw_dkim_alert' in data:
+            r.cw_dkim_alert = bool(data['cw_dkim_alert'])
+        if 'cw_dmarc_alert' in data:
+            r.cw_dmarc_alert = bool(data['cw_dmarc_alert'])
             
         session.commit()
         return jsonify({'message': 'Updated'})
@@ -2076,9 +2184,8 @@ def cleanup_old_probes():
     finally:
         session_db.close()
 
-# Ensure migrations run on app startup (e.g. for Gunicorn workers)
-run_migrations()
-
 # --- Main Entry ---
 if __name__ == '__main__':
+    # Ensure migrations run when executed directly
+    run_migrations()
     app.run(host='0.0.0.0', port=5000, debug=False)  # nosec
