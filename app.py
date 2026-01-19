@@ -142,9 +142,9 @@ class Recipient(Base):
     discord_alerts_enabled = Column(Boolean, default=True)
     cw_alerts_enabled = Column(Boolean, default=False)
     cw_company_id = Column(Integer, default=CONFIG['CW_DEFAULT_COMPANY_ID'])
-    cw_spf_alert = Column(Boolean, default=False)
-    cw_dkim_alert = Column(Boolean, default=False)
-    cw_dmarc_alert = Column(Boolean, default=False)
+    cw_spf_alert = Column(Boolean, default=True)
+    cw_dkim_alert = Column(Boolean, default=True)
+    cw_dmarc_alert = Column(Boolean, default=True)
     alert_active = Column(Boolean, default=False)
 
 class MailTest(Base):
@@ -1725,9 +1725,9 @@ def api_recipients():
                 discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True)),
                 cw_alerts_enabled=bool(data.get('cw_alerts_enabled', False)),
                 cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID'])),
-                cw_spf_alert=bool(data.get('cw_spf_alert', False)),
-                cw_dkim_alert=bool(data.get('cw_dkim_alert', False)),
-                cw_dmarc_alert=bool(data.get('cw_dmarc_alert', False))
+                cw_spf_alert=bool(data.get('cw_spf_alert', True)),
+                cw_dkim_alert=bool(data.get('cw_dkim_alert', True)),
+                cw_dmarc_alert=bool(data.get('cw_dmarc_alert', True))
             )
             session.add(new_r)
             session.commit()

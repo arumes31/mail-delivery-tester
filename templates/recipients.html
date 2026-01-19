@@ -104,15 +104,15 @@
                 <!-- CW Auth Options -->
                 <div id="cwAuthOptionsContainer" class="d-flex gap-3 mt-2 ps-3 border-start border-3 border-info" style="display: none !important;">
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="cwSpfAlertInput">
+                        <input class="form-check-input" type="checkbox" id="cwSpfAlertInput" checked>
                         <label class="form-check-label small" for="cwSpfAlertInput">SPF Alert</label>
                     </div>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="cwDkimAlertInput">
+                        <input class="form-check-input" type="checkbox" id="cwDkimAlertInput" checked>
                         <label class="form-check-label small" for="cwDkimAlertInput">DKIM Alert</label>
                     </div>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="cwDmarcAlertInput">
+                        <input class="form-check-input" type="checkbox" id="cwDmarcAlertInput" checked>
                         <label class="form-check-label small" for="cwDmarcAlertInput">DMARC Alert</label>
                     </div>
                 </div>
@@ -161,14 +161,20 @@
             const checked = document.getElementById('cwAlertsInput').checked;
             document.getElementById('cwCompanyIdContainer').style.visibility = checked ? 'visible' : 'hidden';
             const authOpts = document.getElementById('cwAuthOptionsContainer');
-            if(checked) authOpts.style.removeProperty('display');
-            else authOpts.style.display = 'none';
+            if(checked) {
+                authOpts.style.setProperty('display', 'flex', 'important');
+            } else {
+                authOpts.style.setProperty('display', 'none', 'important');
+            }
         } else {
             const checked = document.getElementById(`cw-alerts-${id}`).checked;
             document.getElementById(`cw-company-container-${id}`).style.visibility = checked ? 'visible' : 'hidden';
             const authOpts = document.getElementById(`cw-auth-options-${id}`);
-            if(checked) authOpts.style.removeProperty('display');
-            else authOpts.style.display = 'none';
+            if(checked) {
+                authOpts.style.setProperty('display', 'flex', 'important');
+            } else {
+                authOpts.style.setProperty('display', 'none', 'important');
+            }
         }
     }
 
@@ -236,7 +242,7 @@
                                             <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
                                         </div>
                                     </div>
-                                    <div id="cw-auth-options-${r.id}" class="d-flex gap-2 small text-muted" style="${r.cw_alerts_enabled ? '' : 'display: none;'}">
+                                    <div id="cw-auth-options-${r.id}" class="d-flex gap-2 small text-muted" style="${r.cw_alerts_enabled ? 'display: flex !important;' : 'display: none !important;'}">
                                         <div class="form-check p-0 m-0" title="SPF Alert">
                                             <input class="form-check-input m-0" type="checkbox" id="cw-spf-${r.id}" ${r.cw_spf_alert ? 'checked' : ''}> <span style="font-size: 0.75rem;">SPF</span>
                                         </div>
