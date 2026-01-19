@@ -63,7 +63,7 @@ CONFIG = {
     'IMAP_PASS': get_env_var('IMAP_PASS'),
     'SEND_INTERVAL': get_env_var('SEND_INTERVAL', 3600, int),
     'CHECK_INTERVAL': get_env_var('CHECK_INTERVAL', 30, int),
-    'ALERT_THRESHOLD': get_env_var('ALERT_THRESHOLD', 300, int),
+    'ALERT_THRESHOLD': get_env_var('ALERT_THRESHOLD', 900, int),
     'DISCORD_WEBHOOK_URL': get_env_var('DISCORD_WEBHOOK_URL'),
     'ALERT_MAIL_RECIPIENT': get_env_var('ALERT_MAIL_RECIPIENT'),
     'ADMIN_USER': get_env_var('ADMIN_USER', 'admin'),
@@ -117,7 +117,7 @@ class EmailProbe(Base):
     status = Column(String(20), default='PENDING') # PENDING, RECEIVED, MISSING
     alert_sent = Column(Boolean, default=False)
     recipient_email = Column(String(120))
-    alert_threshold = Column(Integer, default=300)
+    alert_threshold = Column(Integer, default=900)
     spf_status = Column(String(50))
     dkim_status = Column(String(50))
     dmarc_status = Column(String(50))
@@ -136,7 +136,7 @@ class Recipient(Base):
     email = Column(String(120), unique=True, nullable=False)
     active = Column(Boolean, default=True)
     send_interval = Column(Integer, default=3600)
-    alert_threshold = Column(Integer, default=300)
+    alert_threshold = Column(Integer, default=900)
     next_send_at = Column(DateTime, default=datetime.datetime.utcnow)
     email_alerts_enabled = Column(Boolean, default=True)
     discord_alerts_enabled = Column(Boolean, default=True)
@@ -235,7 +235,7 @@ def run_migrations():
         except Exception:
             session.rollback()
             logger.info("Migrating: Adding alert_threshold to email_probes")
-            session.execute(text("ALTER TABLE email_probes ADD COLUMN alert_threshold INTEGER DEFAULT 300"))
+            session.execute(text("ALTER TABLE email_probes ADD COLUMN alert_threshold INTEGER DEFAULT 900"))
             session.commit()
 
         try:
@@ -244,7 +244,7 @@ def run_migrations():
             session.rollback()
             logger.info("Migrating: Adding new columns to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN send_interval INTEGER DEFAULT 3600"))
-            session.execute(text("ALTER TABLE recipients ADD COLUMN alert_threshold INTEGER DEFAULT 300"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN alert_threshold INTEGER DEFAULT 900"))
             session.execute(text("ALTER TABLE recipients ADD COLUMN next_send_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
             session.commit()
 
@@ -596,6 +596,9 @@ def check_inbox():
         email_ids = messages[0].split()
         if email_ids:
             logger.info(f"IMAP: Found {len(email_ids)} potential probe/test emails.")
+            # Pre-cache recipients for faster lookup
+            all_recipients = session.query(Recipient).all()
+            rec_map = {r.email: r for r in all_recipients}
         
         for e_id in email_ids:
             # Fetch the email
@@ -619,7 +622,8 @@ def check_inbox():
                                 if probe:
                                     if not probe.received_at:
                                         probe.received_at = datetime.datetime.utcnow()
-                                        recipient = session.query(Recipient).filter_by(email=probe.recipient_email).first()
+                                        # Use cached recipient lookup
+                                        recipient = rec_map.get(probe.recipient_email)
                                         if recipient and recipient.alert_active:
                                             msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
@@ -928,10 +932,9 @@ def check_delays():
     try:
         now = datetime.datetime.utcnow()
         
-        # Cache recipient alert status
+        # Cache all recipients to avoid N+1 queries in the loop
         recipients = session.query(Recipient).all()
-        # Map email -> (email_enabled, discord_enabled)
-        alerts_map = {r.email: (r.email_alerts_enabled, r.discord_alerts_enabled) for r in recipients}
+        recipients_map = {r.email: r for r in recipients}
         
         # Find all pending probes that haven't alerted yet
         pending_probes = session.query(EmailProbe).filter(
@@ -949,8 +952,8 @@ def check_delays():
                 probe.status = 'MISSING'
                 probe.alert_sent = True
                 
-                # Fetch recipient to check if we should send alert
-                recipient = session.query(Recipient).filter_by(email=probe.recipient_email).first()
+                # Use the cached recipient lookup
+                recipient = recipients_map.get(probe.recipient_email)
                 if recipient:
                     if not recipient.alert_active:
                         logger.info(f"[DEBUG] Alerting: Probe {probe.guid} is the first failure. Sending notification.")
