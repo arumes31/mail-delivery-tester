@@ -163,6 +163,10 @@
             const authOpts = document.getElementById('cwAuthOptionsContainer');
             if(checked) {
                 authOpts.style.setProperty('display', 'flex', 'important');
+                // Ensure they are checked when enabling
+                document.getElementById('cwSpfAlertInput').checked = true;
+                document.getElementById('cwDkimAlertInput').checked = true;
+                document.getElementById('cwDmarcAlertInput').checked = true;
             } else {
                 authOpts.style.setProperty('display', 'none', 'important');
             }
@@ -327,6 +331,11 @@
         }).then(res => {
             if (res.ok) {
                 document.getElementById('emailInput').value = '';
+                // Reset CW checkboxes to checked
+                document.getElementById('cwSpfAlertInput').checked = true;
+                document.getElementById('cwDkimAlertInput').checked = true;
+                document.getElementById('cwDmarcAlertInput').checked = true;
+                
                 showToast('Recipient added successfully.', 'Success');
                 loadRecipients();
             } else {

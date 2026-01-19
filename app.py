@@ -271,9 +271,11 @@ def run_migrations():
         except Exception:
             session.rollback()
             logger.info("Migrating: Adding cw auth alert columns to recipients")
-            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_spf_alert BOOLEAN DEFAULT FALSE"))
-            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dkim_alert BOOLEAN DEFAULT FALSE"))
-            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dmarc_alert BOOLEAN DEFAULT FALSE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_spf_alert BOOLEAN DEFAULT TRUE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dkim_alert BOOLEAN DEFAULT TRUE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_dmarc_alert BOOLEAN DEFAULT TRUE"))
+            # Also update existing rows if any existed before this migration (unlikely but safe)
+            session.execute(text("UPDATE recipients SET cw_spf_alert = TRUE, cw_dkim_alert = TRUE, cw_dmarc_alert = TRUE"))
             session.commit()
 
         try:
