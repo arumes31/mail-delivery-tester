@@ -831,22 +831,26 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
             
             # 3. Close if requested
             if close_ticket:
-                # Attempt to set status to Closed. Note: 'Closed' must exist as a status name on the board.
+                # Standard JSON Patch for ConnectWise REST API
+                patch_headers = headers.copy()
+                patch_headers["Content-Type"] = "application/json-patch+json"
+                
                 patch_body = [
                     {
                         "op": "replace",
-                        "path": "/status/name",
-                        "value": "Closed"
+                        "path": "status",
+                        "value": {"name": "Closed"}
                     }
                 ]
-                # CW API uses PATCH with standard JSON patch or just partial object update?
-                # CW REST API generally accepts partial object update for PUT/PATCH.
-                # Let's try sending the status object directly.
-                close_body = {
-                    "status": {"name": "Closed"}
-                }
+                
                 logger.info(f"CW: Attempting to close ticket #{ticket_id}...")
-                close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=headers, json=close_body)
+                close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=patch_headers, json=patch_body)
+                
+                if not close_resp.ok:
+                    # Fallback: Some CW versions might accept simple object PATCH
+                    logger.warning(f"CW: JSON Patch failed ({close_resp.status_code}), trying simple object update...")
+                    close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=headers, json={"status": {"name": "Closed"}})
+                
                 if not close_resp.ok:
                     logger.warning(f"CW: Failed to close ticket #{ticket_id}: {close_resp.text}")
                 else:
