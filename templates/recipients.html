@@ -346,7 +346,6 @@
                 toggleCWDisplay('add');
             });
     }
-    }
 
     let recipientIdToDelete = null;
     const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
@@ -494,14 +493,23 @@
 
                 data.forEach(c => {
                     const row = document.createElement('tr');
+                    let actionHtml = '';
+                    if (currentSearchTarget !== 'header') {
+                        actionHtml = `
+                            <button class="btn btn-sm btn-primary" onclick="selectCompany(${c.id})">
+                                <i class="fa-solid fa-check"></i> Select
+                            </button>
+                        `;
+                    } else {
+                        actionHtml = `<span class="badge bg-light text-dark border">ID: ${c.id}</span>`;
+                    }
+
                     row.innerHTML = `
                         <td>${c.id}</td>
                         <td class="fw-bold">${c.name}</td>
                         <td>${c.identifier}</td>
                         <td class="text-end">
-                            <button class="btn btn-sm btn-primary" onclick="selectCompany(${c.id})">
-                                <i class="fa-solid fa-check"></i> Select
-                            </button>
+                            ${actionHtml}
                         </td>
                     `;
                     tbody.appendChild(row);
@@ -520,10 +528,16 @@
     });
 
     function selectCompany(id) {
+        if (currentSearchTarget === 'header') {
+            companySearchModal.hide();
+            return;
+        }
+
         if (currentSearchTarget === 'add') {
             document.getElementById('cwCompanyIdInput').value = id;
         } else {
-            document.getElementById(`cw-company-${currentSearchTarget}`).value = id;
+            const input = document.getElementById(`cw-company-${currentSearchTarget}`);
+            if (input) input.value = id;
         }
         companySearchModal.hide();
     }
