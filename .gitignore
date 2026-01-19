@@ -5,3 +5,4 @@ redis-data/dump.rdb
 data/
 data-web/
 test_headers.txt
+__pycache__/
