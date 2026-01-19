@@ -79,6 +79,7 @@ CONFIG = {
     'CW_PRIVATE_KEY': get_env_var('CW_PRIVATE_KEY'),
     'CW_CLIENT_ID': get_env_var('CW_CLIENT_ID'),
     'CW_URL': get_env_var('CW_URL', 'https://psa.eworx.at/v4_6_release/apis/3.0'),
+    'CW_DEFAULT_COMPANY_ID': get_env_var('CW_DEFAULT_COMPANY_ID', 250, int),
 }
 
 # --- Setup Logging ---
@@ -140,7 +141,7 @@ class Recipient(Base):
     email_alerts_enabled = Column(Boolean, default=True)
     discord_alerts_enabled = Column(Boolean, default=True)
     cw_alerts_enabled = Column(Boolean, default=False)
-    cw_company_id = Column(Integer, default=250)
+    cw_company_id = Column(Integer, default=CONFIG['CW_DEFAULT_COMPANY_ID'])
     alert_active = Column(Boolean, default=False)
 
 class MailTest(Base):
@@ -259,7 +260,7 @@ def run_migrations():
             session.rollback()
             logger.info("Migrating: Adding cw_alerts_enabled and cw_company_id to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN cw_alerts_enabled BOOLEAN DEFAULT FALSE"))
-            session.execute(text("ALTER TABLE recipients ADD COLUMN cw_company_id INTEGER DEFAULT 250"))
+            session.execute(text(f"ALTER TABLE recipients ADD COLUMN cw_company_id INTEGER DEFAULT {CONFIG['CW_DEFAULT_COMPANY_ID']}"))
             session.commit()
 
         try:
@@ -779,9 +780,9 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
         logger.warning("ConnectWise config missing. Skipping ticket creation.")
         return
 
-    # Use default company ID if not provided (though model default is 250)
+    # Use default company ID if not provided (though model default is set from config)
     if not company_id_val:
-        company_id_val = 250
+        company_id_val = CONFIG['CW_DEFAULT_COMPANY_ID']
 
     # Auth Setup
     auth_string = f"{CONFIG['CW_COMPANY']}+{CONFIG['CW_PUBLIC_KEY']}:{CONFIG['CW_PRIVATE_KEY']}"
@@ -1690,7 +1691,7 @@ def api_recipients():
                 email_alerts_enabled=bool(data.get('email_alerts_enabled', True)),
                 discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True)),
                 cw_alerts_enabled=bool(data.get('cw_alerts_enabled', False)),
-                cw_company_id=int(data.get('cw_company_id', 250))
+                cw_company_id=int(data.get('cw_company_id', CONFIG['CW_DEFAULT_COMPANY_ID']))
             )
             session.add(new_r)
             session.commit()
