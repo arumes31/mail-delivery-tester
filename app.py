@@ -78,6 +78,7 @@ CONFIG = {
     'CW_PUBLIC_KEY': get_env_var('CW_PUBLIC_KEY'),
     'CW_PRIVATE_KEY': get_env_var('CW_PRIVATE_KEY'),
     'CW_CLIENT_ID': get_env_var('CW_CLIENT_ID'),
+    'CW_URL': get_env_var('CW_URL', 'https://psa.eworx.at/v4_6_release/apis/3.0'),
 }
 
 # --- Setup Logging ---
@@ -487,7 +488,7 @@ def send_probe_email():
                             if recipient.email_alerts_enabled:
                                 send_email_alert(msg_rec)
                             if recipient.cw_alerts_enabled:
-                                send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg_rec, recipient.cw_company_id)
+                                send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg_rec, recipient.cw_company_id, close_ticket=True)
                             recipient.alert_active = False
                     
                     # Update next send time
@@ -607,7 +608,7 @@ def check_inbox():
                                             msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
-                                            if recipient.cw_alerts_enabled: send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg_rec, recipient.cw_company_id)
+                                            if recipient.cw_alerts_enabled: send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg_rec, recipient.cw_company_id, close_ticket=True)
                                             recipient.alert_active = False
                                         
                                         # Extract Auth Results
@@ -772,7 +773,7 @@ def send_email_alert(message):
     except Exception as e:
         logger.error(f"[DEBUG] Failed to send email alert: {e}")
 
-def send_cw_ticket(recipient_email, subject, description, company_id_val):
+def send_cw_ticket(recipient_email, subject, description, company_id_val, close_ticket=False):
     """Creates or updates a ConnectWise ticket."""
     if not CONFIG['CW_COMPANY'] or not CONFIG['CW_PUBLIC_KEY'] or not CONFIG['CW_PRIVATE_KEY'] or not CONFIG['CW_CLIENT_ID']:
         logger.warning("ConnectWise config missing. Skipping ticket creation.")
@@ -794,7 +795,7 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val):
     }
     
     # API Endpoints
-    base_url = "https://psa.eworx.at/v4_6_release/apis/3.0"
+    base_url = CONFIG['CW_URL']
     tickets_url = f"{base_url}/service/tickets"
     
     # Static Board ID from requirements
@@ -827,19 +828,46 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val):
             }
             requests.post(notes_url, headers=headers, json=note_body).raise_for_status()
             logger.info(f"CW: Note added to ticket #{ticket_id}.")
+            
+            # 3. Close if requested
+            if close_ticket:
+                # Attempt to set status to Closed. Note: 'Closed' must exist as a status name on the board.
+                patch_body = [
+                    {
+                        "op": "replace",
+                        "path": "/status/name",
+                        "value": "Closed"
+                    }
+                ]
+                # CW API uses PATCH with standard JSON patch or just partial object update?
+                # CW REST API generally accepts partial object update for PUT/PATCH.
+                # Let's try sending the status object directly.
+                close_body = {
+                    "status": {"name": "Closed"}
+                }
+                logger.info(f"CW: Attempting to close ticket #{ticket_id}...")
+                close_resp = requests.patch(f"{tickets_url}/{ticket_id}", headers=headers, json=close_body)
+                if not close_resp.ok:
+                    logger.warning(f"CW: Failed to close ticket #{ticket_id}: {close_resp.text}")
+                else:
+                    logger.info(f"CW: Ticket #{ticket_id} closed.")
+
         else:
-            # 3. Create new ticket
-            logger.info("CW: No existing ticket. Creating new.")
-            new_ticket_body = {
-                "summary": subject,
-                "board": {"id": board_id},
-                "company": {"id": company_id_val},
-                "initialDescription": description
-            }
-            create_response = requests.post(tickets_url, headers=headers, json=new_ticket_body)
-            create_response.raise_for_status()
-            result = create_response.json()
-            logger.info(f"CW: Created ticket #{result.get('id')}.")
+            if not close_ticket:
+                # 4. Create new ticket only if we are not trying to close a non-existent one
+                logger.info("CW: No existing ticket. Creating new.")
+                new_ticket_body = {
+                    "summary": subject,
+                    "board": {"id": board_id},
+                    "company": {"id": company_id_val},
+                    "initialDescription": description
+                }
+                create_response = requests.post(tickets_url, headers=headers, json=new_ticket_body)
+                create_response.raise_for_status()
+                result = create_response.json()
+                logger.info(f"CW: Created ticket #{result.get('id')}.")
+            else:
+                logger.info("CW: Close requested but no open ticket found. Skipping creation.")
 
     except Exception as e:
         logger.error(f"CW Error: {e}")
