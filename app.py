@@ -806,9 +806,25 @@ def send_email_alert(message):
     except Exception as e:
         logger.error(f"[DEBUG] Failed to send email alert: {e}")
 
+def get_cw_headers():
+    """Returns headers for ConnectWise API calls."""
+    if not CONFIG['CW_COMPANY'] or not CONFIG['CW_PUBLIC_KEY'] or not CONFIG['CW_PRIVATE_KEY'] or not CONFIG['CW_CLIENT_ID']:
+        return None
+
+    auth_string = f"{CONFIG['CW_COMPANY']}+{CONFIG['CW_PUBLIC_KEY']}:{CONFIG['CW_PRIVATE_KEY']}"
+    base64_auth = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
+    
+    return {
+        "Authorization": f"Basic {base64_auth}",
+        "clientId": CONFIG['CW_CLIENT_ID'],
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
 def send_cw_ticket(recipient_email, subject, description, company_id_val, close_ticket=False):
     """Creates or updates a ConnectWise ticket."""
-    if not CONFIG['CW_COMPANY'] or not CONFIG['CW_PUBLIC_KEY'] or not CONFIG['CW_PRIVATE_KEY'] or not CONFIG['CW_CLIENT_ID']:
+    headers = get_cw_headers()
+    if not headers:
         logger.warning("ConnectWise config missing. Skipping ticket creation.")
         return
 
@@ -816,17 +832,6 @@ def send_cw_ticket(recipient_email, subject, description, company_id_val, close_
     if not company_id_val:
         company_id_val = CONFIG['CW_DEFAULT_COMPANY_ID']
 
-    # Auth Setup
-    auth_string = f"{CONFIG['CW_COMPANY']}+{CONFIG['CW_PUBLIC_KEY']}:{CONFIG['CW_PRIVATE_KEY']}"
-    base64_auth = base64.b64encode(auth_string.encode('ascii')).decode('ascii')
-    
-    headers = {
-        "Authorization": f"Basic {base64_auth}",
-        "clientId": CONFIG['CW_CLIENT_ID'],
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-    
     # API Endpoints
     base_url = CONFIG['CW_URL']
     tickets_url = f"{base_url}/service/tickets"
@@ -979,6 +984,30 @@ def check_delays():
 # --- Flask App ---
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'maildt-default-secret-key-change-me')
+
+_app_initialized = False
+
+@app.before_request
+def initialize_app():
+    """Runs once before the first request to initialize the database."""
+    global _app_initialized
+    if not _app_initialized:
+        logger.info("Initializing application database...")
+        try:
+            run_migrations()
+            # Only reset alert states if we are the main app (not scheduler)
+            if SERVICE_NAME == 'web':
+                reset_alert_states()
+            _app_initialized = True
+            logger.info("Application initialization complete.")
+        except Exception as e:
+            logger.error(f"CRITICAL: Application failed to initialize: {e}")
+            # In a real app we might want to exit, but here we'll let it retry next request
+            # or show errors.
+
+@app.route('/health')
+def health():
+    return {"status": "running"}, 200
 
 @app.context_processor
 def inject_config():
@@ -1687,6 +1716,76 @@ def api_mail_tester_start(test_id):
     logger.info(f"Fast polling signal recorded for test: {test_id}")
     return jsonify({'status': 'started'})
 
+@app.route('/api/cw/companies')
+@login_required
+def api_cw_companies():
+    headers = get_cw_headers()
+    if not headers:
+        return jsonify({'error': 'ConnectWise not configured'}), 503
+
+    search = request.args.get('search', '').strip()
+    if not search:
+        return jsonify([])
+
+    try:
+        base_url = CONFIG['CW_URL']
+        companies_url = f"{base_url}/company/companies"
+        
+        # Search by name or identifier
+        # CW API Syntax: conditions=name like "search%"
+        # We'll use wildcard match
+        conditions = f'(name like "%{search}%" OR identifier like "%{search}%") AND deletedFlag=false'
+        
+        params = {
+            "conditions": conditions,
+            "orderBy": "name asc",
+            "pageSize": 20,
+            "fields": "id,name,identifier" # Fetch only needed fields
+        }
+        
+        response = requests.get(companies_url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        
+        return jsonify(response.json())
+    except Exception as e:
+        logger.error(f"CW Company Search Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cw/companies')
+@login_required
+def api_cw_companies():
+    headers = get_cw_headers()
+    if not headers:
+        return jsonify({'error': 'ConnectWise not configured'}), 503
+
+    search = request.args.get('search', '').strip()
+    if not search:
+        return jsonify([])
+
+    try:
+        base_url = CONFIG['CW_URL']
+        companies_url = f"{base_url}/company/companies"
+        
+        # Search by name or identifier
+        # CW API Syntax: conditions=name like "search%"
+        # We'll use wildcard match
+        conditions = f'(name like "%{search}%" OR identifier like "%{search}%") AND deletedFlag=false'
+        
+        params = {
+            "conditions": conditions,
+            "orderBy": "name asc",
+            "pageSize": 20,
+            "fields": "id,name,identifier" # Fetch only needed fields
+        }
+        
+        response = requests.get(companies_url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        
+        return jsonify(response.json())
+    except Exception as e:
+        logger.error(f"CW Company Search Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recipients', methods=['GET', 'POST'])
 @login_required
 def api_recipients():
@@ -2120,9 +2219,8 @@ def cleanup_old_probes():
     finally:
         session_db.close()
 
-# Ensure migrations run on app startup (e.g. for Gunicorn workers)
-run_migrations()
-
 # --- Main Entry ---
 if __name__ == '__main__':
+    # Ensure migrations run when executed directly
+    run_migrations()
     app.run(host='0.0.0.0', port=5000, debug=False)  # nosec
