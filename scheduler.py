@@ -21,7 +21,11 @@ reset_alert_states()
 
 # Setup Scheduler
 # We use BackgroundScheduler here because Gunicorn will own the main process/thread
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(job_defaults={
+    'coalesce': False,
+    'max_instances': 3,
+    'misfire_grace_time': 60
+})
 
 # Add jobs if config is present
 if CONFIG['SMTP_HOST']:
