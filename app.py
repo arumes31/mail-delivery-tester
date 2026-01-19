@@ -489,7 +489,7 @@ def send_probe_email():
                             if recipient.email_alerts_enabled:
                                 send_email_alert(msg_rec)
                             if recipient.cw_alerts_enabled:
-                                send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg_rec, recipient.cw_company_id, close_ticket=True)
+                                send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", msg_rec, recipient.cw_company_id, close_ticket=True)
                             recipient.alert_active = False
                     
                     # Update next send time
@@ -519,7 +519,7 @@ def send_probe_email():
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
                         if recipient.cw_alerts_enabled:
-                            send_cw_ticket(recipient.email, "Monitoring Basic - server check", err_msg, recipient.cw_company_id)
+                            send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", err_msg, recipient.cw_company_id)
                         recipient.alert_active = True
                     
                     # Still update next send time
@@ -609,7 +609,7 @@ def check_inbox():
                                             msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
-                                            if recipient.cw_alerts_enabled: send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg_rec, recipient.cw_company_id, close_ticket=True)
+                                            if recipient.cw_alerts_enabled: send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", msg_rec, recipient.cw_company_id, close_ticket=True)
                                             recipient.alert_active = False
                                         
                                         # Extract Auth Results
@@ -922,7 +922,7 @@ def check_delays():
                             send_email_alert(msg)
                         
                         if recipient.cw_alerts_enabled:
-                            send_cw_ticket(recipient.email, "Monitoring Basic - server check", msg, recipient.cw_company_id)
+                            send_cw_ticket(recipient.email, f"Mail Delivery Monitoring - {recipient.email}", msg, recipient.cw_company_id)
                         
                         increment_counter('alert_sent', session_provided=session)
                         recipient.alert_active = True
