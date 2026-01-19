@@ -25,12 +25,16 @@ scheduler = BackgroundScheduler()
 
 # Add jobs if config is present
 if CONFIG['SMTP_HOST']:
-    scheduler.add_job(func=send_probe_email, trigger="interval", seconds=30)
-    logger.info("Scheduler: Added send job every 30s")
+    # Poll every 10s to see if any recipient is due for a probe
+    scheduler.add_job(func=send_probe_email, trigger="interval", seconds=10)
+    logger.info("Scheduler: Added send job polling every 10s")
 
 if CONFIG['IMAP_HOST']:
-    scheduler.add_job(func=check_inbox, trigger="interval", seconds=5)
-    logger.info("Scheduler: Added check job every 5s")
+    # Use the configured CHECK_INTERVAL for IMAP polling frequency
+    imap_interval = CONFIG.get('CHECK_INTERVAL', 30)
+    if imap_interval < 5: imap_interval = 5 # Minimum 5s
+    scheduler.add_job(func=check_inbox, trigger="interval", seconds=imap_interval)
+    logger.info(f"Scheduler: Added check job every {imap_interval}s")
 
 scheduler.add_job(func=check_delays, trigger="interval", seconds=30)
 scheduler.add_job(func=cleanup_old_probes, trigger="interval", hours=24)

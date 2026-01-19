@@ -413,6 +413,7 @@ def send_probe_email():
         ).all()
         
         if not recipients:
+            logger.info("No recipients due for probe sending.")
             return # Nothing to do
 
         # Choose connection type based on port
@@ -577,28 +578,25 @@ def check_inbox():
         session.query(ActiveTestSignal).filter(ActiveTestSignal.created_at < cutoff).delete()
         session.commit()
 
-        has_active_tests = session.query(ActiveTestSignal).count() > 0
-        
-        # Throttle if no active tests
-        seconds_since_last = (now - LAST_IMAP_CHECK).total_seconds()
-        if not has_active_tests and seconds_since_last < CONFIG['CHECK_INTERVAL']:
-            return
-
+        # No more internal throttling here, rely on scheduler interval
         LAST_IMAP_CHECK = now
 
         mail = imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'])
         mail.login(CONFIG['IMAP_USER'], CONFIG['IMAP_PASS'])
-        mail.select("inbox")
+        mail.select("INBOX") # Use uppercase INBOX for better compatibility
 
         # Search for emails with our subject prefix
         # We search for both PROBE and TEST
         status, messages = mail.search(None, '(OR (SUBJECT "MAILDT-PROBE:") (SUBJECT "MAILDT-TEST:"))')
         
         if status != "OK":
-            logger.warning("IMAP search failed.")
+            logger.warning(f"IMAP search failed: {status}")
             return
 
         email_ids = messages[0].split()
+        if email_ids:
+            logger.info(f"IMAP: Found {len(email_ids)} potential probe/test emails.")
+        
         for e_id in email_ids:
             # Fetch the email
             res, msg_data = mail.fetch(e_id, "(RFC822)")
@@ -608,6 +606,8 @@ def check_inbox():
                     subject, encoding = decode_header(msg["Subject"])[0]
                     if isinstance(subject, bytes):
                         subject = subject.decode(encoding if encoding else "utf-8")
+                    
+                    logger.info(f"IMAP: Processing email with subject: {subject}")
                     
                     if "MAILDT-PROBE:" in subject:
                         try:
@@ -661,6 +661,10 @@ def check_inbox():
                                         increment_counter('mail_received', session_provided=session)
                                         session.commit()
                                         logger.info(f"Received probe {guid}.")
+                                    else:
+                                        logger.info(f"Probe {guid} already marked as received.")
+                                else:
+                                    logger.warning(f"IMAP: Received probe with GUID {guid} but it's not in our database.")
                                 mail.store(e_id, '+FLAGS', r'\Deleted')
                         except Exception as parse_err:
                             logger.error(f"Error processing probe email: {parse_err}")
@@ -1831,10 +1835,13 @@ def update_recipient(r_id):
         
         data = request.json
         if 'send_interval' in data:
+            old_interval = r.send_interval
             r.send_interval = int(data['send_interval'])
-            # Reset next send time to now to trigger immediate schedule update or just let it roll
-            # If we shorten it, we might want it to happen sooner. 
-            # If we lengthen it, the old next_send_at is still valid until it fires.
+            # If the interval was shortened, adjust next_send_at so it happens sooner
+            # We set it to now + new_interval, or just now if it was long ago
+            now = datetime.datetime.utcnow()
+            r.next_send_at = now + datetime.timedelta(seconds=r.send_interval)
+            logger.info(f"Updated interval for {r.email} to {r.send_interval}s. Next send at: {r.next_send_at}")
         if 'alert_threshold' in data:
             r.alert_threshold = int(data['alert_threshold'])
         if 'active' in data:
