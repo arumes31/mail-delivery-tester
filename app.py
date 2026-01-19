@@ -63,7 +63,7 @@ CONFIG = {
     'IMAP_PASS': get_env_var('IMAP_PASS'),
     'SEND_INTERVAL': get_env_var('SEND_INTERVAL', 3600, int),
     'CHECK_INTERVAL': get_env_var('CHECK_INTERVAL', 30, int),
-    'ALERT_THRESHOLD': get_env_var('ALERT_THRESHOLD', 300, int),
+    'ALERT_THRESHOLD': get_env_var('ALERT_THRESHOLD', 900, int),
     'DISCORD_WEBHOOK_URL': get_env_var('DISCORD_WEBHOOK_URL'),
     'ALERT_MAIL_RECIPIENT': get_env_var('ALERT_MAIL_RECIPIENT'),
     'ADMIN_USER': get_env_var('ADMIN_USER', 'admin'),
@@ -117,7 +117,7 @@ class EmailProbe(Base):
     status = Column(String(20), default='PENDING') # PENDING, RECEIVED, MISSING
     alert_sent = Column(Boolean, default=False)
     recipient_email = Column(String(120))
-    alert_threshold = Column(Integer, default=300)
+    alert_threshold = Column(Integer, default=900)
     spf_status = Column(String(50))
     dkim_status = Column(String(50))
     dmarc_status = Column(String(50))
@@ -136,7 +136,7 @@ class Recipient(Base):
     email = Column(String(120), unique=True, nullable=False)
     active = Column(Boolean, default=True)
     send_interval = Column(Integer, default=3600)
-    alert_threshold = Column(Integer, default=300)
+    alert_threshold = Column(Integer, default=900)
     next_send_at = Column(DateTime, default=datetime.datetime.utcnow)
     email_alerts_enabled = Column(Boolean, default=True)
     discord_alerts_enabled = Column(Boolean, default=True)
@@ -235,7 +235,7 @@ def run_migrations():
         except Exception:
             session.rollback()
             logger.info("Migrating: Adding alert_threshold to email_probes")
-            session.execute(text("ALTER TABLE email_probes ADD COLUMN alert_threshold INTEGER DEFAULT 300"))
+            session.execute(text("ALTER TABLE email_probes ADD COLUMN alert_threshold INTEGER DEFAULT 900"))
             session.commit()
 
         try:
@@ -244,7 +244,7 @@ def run_migrations():
             session.rollback()
             logger.info("Migrating: Adding new columns to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN send_interval INTEGER DEFAULT 3600"))
-            session.execute(text("ALTER TABLE recipients ADD COLUMN alert_threshold INTEGER DEFAULT 300"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN alert_threshold INTEGER DEFAULT 900"))
             session.execute(text("ALTER TABLE recipients ADD COLUMN next_send_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
             session.commit()
 
