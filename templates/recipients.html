@@ -82,13 +82,13 @@
                 </div>
                 <div class="form-text">Alert after delay</div>
             </div>
-            <div class="col-md-2">
-                <label for="cwCompanyIdInput" class="form-label fw-bold">CW Co. ID</label>
+            <div class="col-md-2" id="cwCompanyIdContainer">
+                <label for="cwCompanyIdInput" class="form-label fw-bold">Connectwise ID</label>
                 <div class="input-group">
                     <span class="input-group-text"><i class="fa-solid fa-building"></i></span>
                     <input type="number" class="form-control" id="cwCompanyIdInput" value="250" required>
                 </div>
-                <div class="form-text">ConnectWise ID</div>
+                <div class="form-text">CW Company ID</div>
             </div>
              <div class="col-md-2">
                 <label class="form-label fw-bold d-block">Alert Channels</label>
@@ -101,8 +101,8 @@
                     <label class="form-check-label" for="discordAlertsInput"><i class="fa-solid fa-brands fa-discord me-1"></i> Discord</label>
                 </div>
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="cwAlertsInput">
-                    <label class="form-check-label" for="cwAlertsInput"><i class="fa-solid fa-ticket me-1"></i> CW Ticket</label>
+                    <input class="form-check-input" type="checkbox" id="cwAlertsInput" onchange="toggleCWDisplay('add')">
+                    <label class="form-check-label" for="cwAlertsInput"><i class="fa-solid fa-ticket me-1"></i> Connectwise Ticketing</label>
                 </div>
             </div>
             <div class="col-md-1 d-flex align-items-center pt-3">
@@ -126,11 +126,11 @@
                         <th>Email</th>
                         <th style="width: 100px;">Interval (s)</th>
                         <th style="width: 100px;">Threshold (s)</th>
-                        <th style="width: 90px;">CW ID</th>
+                        <th style="width: 110px;">Connectwise ID</th>
                         <th class="text-center">Active</th>
                         <th class="text-center">Email</th>
                         <th class="text-center">Discord</th>
-                        <th class="text-center">CW</th>
+                        <th class="text-center" style="width: 150px;">Connectwise Ticketing</th>
                         <th class="text-end">Actions</th>
                     </tr>
                 </thead>
@@ -145,6 +145,16 @@
 
 {% block scripts %}
 <script>
+    function toggleCWDisplay(id) {
+        if (id === 'add') {
+            const checked = document.getElementById('cwAlertsInput').checked;
+            document.getElementById('cwCompanyIdContainer').style.visibility = checked ? 'visible' : 'hidden';
+        } else {
+            const checked = document.getElementById(`cw-alerts-${id}`).checked;
+            document.getElementById(`cw-company-container-${id}`).style.visibility = checked ? 'visible' : 'hidden';
+        }
+    }
+
     function updateSchedulerStatus() {
         const badge = document.getElementById('schedulerStatusBadge');
         fetch('/api/scheduler/health')
@@ -185,7 +195,9 @@
                                 <input type="number" class="form-control form-control-sm" id="threshold-${r.id}" value="${r.alert_threshold}" min="10">
                             </td>
                             <td>
-                                <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                <div id="cw-company-container-${r.id}" style="visibility: ${r.cw_alerts_enabled ? 'visible' : 'hidden'}">
+                                    <input type="number" class="form-control form-control-sm" id="cw-company-${r.id}" value="${r.cw_company_id || 250}">
+                                </div>
                             </td>
                             <td class="text-center">
                                 <div class="form-check form-switch d-flex justify-content-center">
@@ -204,7 +216,7 @@
                             </td>
                             <td class="text-center">
                                 <div class="form-check form-switch d-flex justify-content-center">
-                                    <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''}>
+                                    <input class="form-check-input" type="checkbox" id="cw-alerts-${r.id}" ${r.cw_alerts_enabled ? 'checked' : ''} onchange="toggleCWDisplay(${r.id})">
                                 </div>
                             </td>
                             <td class="text-end">
@@ -218,6 +230,8 @@
                         </tr>
                     `;
                 });
+                // Initialize add form visibility
+                toggleCWDisplay('add');
             });
     }
 
