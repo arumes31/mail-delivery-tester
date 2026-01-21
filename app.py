@@ -1130,6 +1130,8 @@ def settings():
     if safe_config['IMAP_PASS']: safe_config['IMAP_PASS'] = '********'  # nosec
     if safe_config['ADMIN_PASSWORD']: safe_config['ADMIN_PASSWORD'] = '********'  # nosec
     if safe_config['ADMIN_TOTP_SECRET']: safe_config['ADMIN_TOTP_SECRET'] = '********'  # nosec
+    if safe_config['CW_PRIVATE_KEY']: safe_config['CW_PRIVATE_KEY'] = '********'  # nosec
+    if safe_config['DISCORD_WEBHOOK_URL']: safe_config['DISCORD_WEBHOOK_URL'] = '********'  # nosec
     
     # Mask Database URL password
     import re
