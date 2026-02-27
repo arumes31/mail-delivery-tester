@@ -74,6 +74,7 @@ CONFIG = {
     'WHOIS_URL': get_env_var('WHOIS_URL', 'https://whois.reitetschlaeger.com'),
     'ENABLE_WEBCHECK': get_env_var('ENABLE_WEBCHECK', 'true', bool),
     'WEBCHECK_URL': get_env_var('WEBCHECK_URL', 'https://webcheck-512351112734521.reitetschlaeger.com/'),
+    'WEBHOOK_URL': get_env_var('WEBHOOK_URL'),
     'WEBHOOK_TIMEOUT': get_env_var('WEBHOOK_TIMEOUT', 10, int),
 }
 
@@ -253,9 +254,8 @@ def run_migrations():
             session.execute(text("SELECT webhook_alerts_enabled FROM recipients LIMIT 1"))
         except Exception:
             session.rollback()
-            logger.info("Migrating: Adding webhook_alerts_enabled and webhook_url to recipients")
+            logger.info("Migrating: Adding webhook_alerts_enabled to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN webhook_alerts_enabled BOOLEAN DEFAULT FALSE"))
-            session.execute(text("ALTER TABLE recipients ADD COLUMN webhook_url VARCHAR(255)"))
             session.commit()
 
         try:
@@ -484,8 +484,8 @@ def send_probe_email():
                                 send_discord_alert(msg_rec)
                             if recipient.email_alerts_enabled:
                                 send_email_alert(msg_rec)
-                            if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                                send_webhook_alert(recipient.webhook_url, "Mail Delivery Recovered", msg_rec, recipient.email, status="Closed")
+                            if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
+                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Recovered", msg_rec, recipient.email, status="Closed")
                             recipient.alert_active = False
                     
                     # Update next send time
@@ -514,8 +514,8 @@ def send_probe_email():
                             send_discord_alert(err_msg)
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
-                        if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                            send_webhook_alert(recipient.webhook_url, "Mail Delivery Alert", err_msg, recipient.email, status="Open")
+                        if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
+                            send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Alert", err_msg, recipient.email, status="Open")
                         recipient.alert_active = True
                     
                     # Still update next send time
@@ -608,8 +608,8 @@ def check_inbox():
                                             msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
-                                            if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                                                send_webhook_alert(recipient.webhook_url, "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed")
+                                            if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
+                                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed")
                                             recipient.alert_active = False
 
                                         # Extract Auth Results robustly
@@ -1654,8 +1654,7 @@ def api_recipients():
                 'alert_threshold': r.alert_threshold,
                 'email_alerts_enabled': r.email_alerts_enabled,
                 'discord_alerts_enabled': r.discord_alerts_enabled,
-                'webhook_alerts_enabled': r.webhook_alerts_enabled,
-                'webhook_url': r.webhook_url
+                'webhook_alerts_enabled': r.webhook_alerts_enabled
             } for r in recipients])
             
         elif request.method == 'POST':
@@ -1674,8 +1673,7 @@ def api_recipients():
                 alert_threshold=int(data.get('alert_threshold', 300)),
                 email_alerts_enabled=bool(data.get('email_alerts_enabled', True)),
                 discord_alerts_enabled=bool(data.get('discord_alerts_enabled', True)),
-                webhook_alerts_enabled=bool(data.get('webhook_alerts_enabled', False)),
-                webhook_url=data.get('webhook_url')
+                webhook_alerts_enabled=bool(data.get('webhook_alerts_enabled', True))
             )
             session.add(new_r)
             session.commit()
@@ -1730,8 +1728,6 @@ def update_recipient(r_id):
             r.discord_alerts_enabled = bool(data['discord_alerts_enabled'])
         if 'webhook_alerts_enabled' in data:
             r.webhook_alerts_enabled = bool(data['webhook_alerts_enabled'])
-        if 'webhook_url' in data:
-            r.webhook_url = data['webhook_url']
             
         session.commit()
         return jsonify({'message': 'Updated'})

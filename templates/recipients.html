@@ -32,7 +32,8 @@
             <p class="mb-0 text-muted">For monitoring to function, each recipient address must be configured to
                 <strong>automatically forward</strong> all incoming mail (or specifically mail with the subject prefix
                 <code>MAILDT-PROBE:</code>) to your monitoring mailbox: <code
-                    class="text-primary fw-bold">{{ imap_user }}</code>.</p>
+                    class="text-primary fw-bold">{{ imap_user }}</code>.
+            </p>
         </div>
     </div>
 </div>
@@ -233,13 +234,7 @@
                             <td>
                                 <div class="d-flex align-items-center justify-content-center p-2 rounded bg-light border">
                                     <div class="form-check form-switch m-0 d-flex align-items-center">
-                                        <input class="form-check-input m-0 mb-1" type="checkbox" id="webhook-alerts-${r.id}" ${r.webhook_alerts_enabled ? 'checked' : ''} onchange="toggleWebhookDisplay(${r.id})">
-                                    </div>
-                                    <div id="webhook-url-container-${r.id}" style="width: 250px; display: ${r.webhook_alerts_enabled ? 'flex' : 'none'}; margin-left: 10px;">
-                                        <div class="input-group input-group-sm">
-                                            <span class="input-group-text bg-white border-end-0 text-muted px-2"><i class="fa-solid fa-link"></i></span>
-                                            <input type="url" class="form-control border-start-0 fs-7 px-1 text-truncate" id="webhook-url-${r.id}" value="${r.webhook_url || ''}" placeholder="https://...">
-                                        </div>
+                                        <input class="form-check-input m-0 mb-1" type="checkbox" id="webhook-alerts-${r.id}" ${r.webhook_alerts_enabled ? 'checked' : ''}>
                                     </div>
                                 </div>
                             </td>
@@ -291,8 +286,9 @@
         const email = document.getElementById('emailInput').value;
         const interval = document.getElementById('intervalInput').value;
         const threshold = document.getElementById('thresholdInput').value;
+        const emailAlerts = document.getElementById('emailAlertsInput').checked;
+        const discordAlerts = document.getElementById('discordAlertsInput').checked;
         const webhookAlerts = document.getElementById('webhookAlertsInput').checked;
-        const webhookUrl = document.getElementById('webhookUrlInput').value;
 
         fetch('/api/recipients', {
             method: 'POST',
@@ -303,13 +299,11 @@
                 alert_threshold: threshold,
                 email_alerts_enabled: emailAlerts,
                 discord_alerts_enabled: discordAlerts,
-                webhook_alerts_enabled: webhookAlerts,
-                webhook_url: webhookUrl
+                webhook_alerts_enabled: webhookAlerts
             })
         }).then(res => {
             if (res.ok) {
                 document.getElementById('emailInput').value = '';
-                document.getElementById('webhookUrlInput').value = '';
 
                 showToast('Recipient added successfully.', 'Success');
                 loadRecipients();
@@ -322,8 +316,10 @@
     function saveRecipient(id) {
         const interval = document.getElementById(`interval-${id}`).value;
         const threshold = document.getElementById(`threshold-${id}`).value;
+        const active = document.getElementById(`active-${id}`).checked;
+        const emailAlerts = document.getElementById(`email-alerts-${id}`).checked;
+        const discordAlerts = document.getElementById(`discord-alerts-${id}`).checked;
         const webhookAlerts = document.getElementById(`webhook-alerts-${id}`).checked;
-        const webhookUrl = document.getElementById(`webhook-url-${id}`).value;
 
         fetch(`/api/recipients/${id}`, {
             method: 'PUT',
@@ -334,8 +330,7 @@
                 active: active,
                 email_alerts_enabled: emailAlerts,
                 discord_alerts_enabled: discordAlerts,
-                webhook_alerts_enabled: webhookAlerts,
-                webhook_url: webhookUrl
+                webhook_alerts_enabled: webhookAlerts
             })
         }).then(res => {
             if (res.ok) {
