@@ -109,7 +109,7 @@
                                 class="fa-solid fa-code-merge me-1"></i> Webhooks</label>
                     </div>
                 </div>
-                <!-- CW Auth Options -->
+                <!-- End Alert Channels -->
 
             </div>
             <div class="col-md-1 d-flex align-items-center pt-3">
@@ -151,6 +151,10 @@
 
 {% block scripts %}
 <script>
+    const escapeHTML = str => str.replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag]));
+
     function updateSchedulerStatus() {
         const badge = document.getElementById('schedulerStatusBadge');
         fetch('/api/scheduler/health')
@@ -183,7 +187,7 @@
                 data.forEach(r => {
                     const rowHtml = `
                         <tr id="row-${r.id}">
-                            <td class="fw-bold">${r.email}</td>
+                            <td class="fw-bold">${escapeHTML(r.email)}</td>
                             <td>
                                 <input type="number" class="form-control form-control-sm" id="interval-${r.id}" value="${r.send_interval}" min="30">
                             </td>
@@ -214,7 +218,7 @@
                                 <button class="btn btn-sm btn-outline-success me-1" onclick="saveRecipient(${r.id})" title="Save Changes">
                                     <i class="fa-solid fa-save"></i>
                                 </button>
-                                <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete(${r.id}, '${r.email}')" title="Delete">
+                                <button class="btn btn-sm btn-outline-danger" data-email="${escapeHTML(r.email)}" onclick="confirmDelete(${r.id}, this.getAttribute('data-email'))" title="Delete">
                                     <i class="fa-solid fa-trash"></i>
                                 </button>
                             </td>
@@ -246,6 +250,10 @@
                 } else {
                     showToast('Failed to delete.', 'Error');
                 }
+            })
+            .catch(err => {
+                deleteModal.hide();
+                showToast('Network error: ' + err.message, 'Error');
             });
     });
 
@@ -278,6 +286,8 @@
             } else {
                 res.json().then(d => showToast(d.error, 'Error'));
             }
+        }).catch(err => {
+            showToast('Network error: ' + err.message, 'Error');
         });
     });
 
@@ -307,6 +317,8 @@
             } else {
                 showToast('Failed to update recipient.', 'Error');
             }
+        }).catch(err => {
+            showToast('Network error: ' + err.message, 'Error');
         });
     }
 

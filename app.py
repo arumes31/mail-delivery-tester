@@ -254,8 +254,15 @@ def run_migrations():
             session.execute(text("SELECT webhook_alerts_enabled FROM recipients LIMIT 1"))
         except Exception:
             session.rollback()
-            logger.info("Migrating: Adding webhook_alerts_enabled and webhook_url to recipients")
+            logger.info("Migrating: Adding webhook_alerts_enabled to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN webhook_alerts_enabled BOOLEAN DEFAULT FALSE"))
+            session.commit()
+
+        try:
+            session.execute(text("SELECT webhook_url FROM recipients LIMIT 1"))
+        except Exception:
+            session.rollback()
+            logger.info("Migrating: Adding webhook_url to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN webhook_url VARCHAR(255)"))
             session.commit()
 
@@ -816,6 +823,10 @@ def send_webhook_alert(webhook_url, subject, description, recipient_email=None, 
     if not webhook_url:
         return
 
+    from urllib.parse import urlparse
+    parsed = urlparse(webhook_url)
+    masked_url = f"{parsed.scheme}://{parsed.netloc}/..." if parsed.netloc else "hidden-url"
+
     tenant = ""
     if recipient_email and '@' in recipient_email:
         tenant = recipient_email.split('@')[1]
@@ -836,9 +847,9 @@ def send_webhook_alert(webhook_url, subject, description, recipient_email=None, 
             timeout=CONFIG['WEBHOOK_TIMEOUT']
         )
         response.raise_for_status()
-        logger.info(f"Webhook alert sent successfully to {webhook_url}")
+        logger.info(f"Webhook alert sent successfully to {masked_url}")
     except Exception as e:
-        logger.error(f"Failed to send webhook alert to {webhook_url}: {e}")
+        logger.error(f"Failed to send webhook alert to {masked_url}: {e}")
 
 def check_delays():
     """Checks for emails sent > their specific alert_threshold ago that haven't arrived."""
