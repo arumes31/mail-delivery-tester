@@ -612,6 +612,52 @@ def check_inbox():
                                                 send_webhook_alert(recipient.webhook_url, "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed")
                                             recipient.alert_active = False
 
+                                        # Extract Auth Results robustly
+                                        auth_headers = []
+                                        for header_name in ["Authentication-Results", "Authentication-Results-Original", "Received-SPF", "X-Forefront-Antispam-Report"]:
+                                            values = msg.get_all(header_name)
+                                            if values:
+                                                for v in values:
+                                                    auth_headers.append(str(v).lower())
+                                                    
+                                        combined_auth = " ".join(auth_headers)
+                                        
+                                        # Parse SPF
+                                        if re.search(r'\bspf=pass\b', combined_auth) or re.search(r'received-spf:\s*pass', combined_auth):
+                                            probe.spf_status = "pass"
+                                        elif re.search(r'\bspf=(fail|softfail|temperror|permerror)\b', combined_auth) or re.search(r'received-spf:\s*(fail|softfail)', combined_auth):
+                                            probe.spf_status = "fail"
+                                        else:
+                                            probe.spf_status = "unknown"
+
+                                        # Parse DKIM
+                                        if re.search(r'\bdkim=pass\b', combined_auth):
+                                            probe.dkim_status = "pass"
+                                        elif re.search(r'\bdkim=(fail|temperror|permerror)\b', combined_auth):
+                                            probe.dkim_status = "fail"
+                                        else:
+                                            probe.dkim_status = "unknown"
+
+                                        # Parse DMARC
+                                        if re.search(r'\bdmarc=pass\b', combined_auth) or re.search(r'\bdmarc=bestguesspass\b', combined_auth):
+                                            probe.dmarc_status = "pass"
+                                        elif re.search(r'\bdmarc=(fail|temperror|permerror)\b', combined_auth):
+                                            probe.dmarc_status = "fail"
+                                        else:
+                                            probe.dmarc_status = "unknown"
+
+                                        # Log empty or unknown for debugging
+                                        if "unknown" in [probe.spf_status, probe.dkim_status, probe.dmarc_status]:
+                                            logger.info(f"[DEBUG] Auth results incomplete for {probe.guid}. SPF: {probe.spf_status}, DKIM: {probe.dkim_status}, DMARC: {probe.dmarc_status}. Headers found: {combined_auth[:500]}")
+
+                                        # Increment failure counters
+                                        if probe.spf_status == 'fail':
+                                            increment_counter('spf_fail', session_provided=session)
+                                        if probe.dkim_status == 'fail':
+                                            increment_counter('dkim_fail', session_provided=session)
+                                        if probe.dmarc_status == 'fail':
+                                            increment_counter('dmarc_fail', session_provided=session)
+
                                         probe.status = 'RECEIVED'
                                         increment_counter('mail_received', session_provided=session)
                                         session.commit()
