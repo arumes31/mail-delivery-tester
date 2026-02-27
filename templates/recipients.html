@@ -151,7 +151,7 @@
 
 {% block scripts %}
 <script>
-    const escapeHTML = str => str.replace(/[&<>'"]/g, tag => ({
+    const escapeHTML = str => String(str || '').replace(/[&<>'"]/g, tag => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
     }[tag]));
 
@@ -239,7 +239,7 @@
     }
 
     document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
-        if (!recipientIdToDelete) return;
+        if (recipientIdToDelete === null || recipientIdToDelete === undefined) return;
 
         fetch('/api/recipients/' + recipientIdToDelete, { method: 'DELETE' })
             .then(res => {
@@ -254,6 +254,9 @@
             .catch(err => {
                 deleteModal.hide();
                 showToast('Network error: ' + err.message, 'Error');
+            })
+            .finally(() => {
+                recipientIdToDelete = null;
             });
     });
 
