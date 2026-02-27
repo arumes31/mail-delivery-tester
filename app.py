@@ -254,8 +254,9 @@ def run_migrations():
             session.execute(text("SELECT webhook_alerts_enabled FROM recipients LIMIT 1"))
         except Exception:
             session.rollback()
-            logger.info("Migrating: Adding webhook_alerts_enabled to recipients")
+            logger.info("Migrating: Adding webhook_alerts_enabled and webhook_url to recipients")
             session.execute(text("ALTER TABLE recipients ADD COLUMN webhook_alerts_enabled BOOLEAN DEFAULT FALSE"))
+            session.execute(text("ALTER TABLE recipients ADD COLUMN webhook_url VARCHAR(255)"))
             session.commit()
 
         try:
@@ -612,13 +613,12 @@ def check_inbox():
                                                 send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed")
                                             recipient.alert_active = False
 
-                                        # Extract Auth Results robustly
                                         auth_headers = []
                                         for header_name in ["Authentication-Results", "Authentication-Results-Original", "Received-SPF", "X-Forefront-Antispam-Report"]:
                                             values = msg.get_all(header_name)
                                             if values:
                                                 for v in values:
-                                                    auth_headers.append(str(v).lower())
+                                                    auth_headers.append(f"{header_name.lower()}: {str(v).lower()}")
                                                     
                                         combined_auth = " ".join(auth_headers)
                                         
@@ -879,8 +879,10 @@ def check_delays():
                         if recipient.email_alerts_enabled:
                             send_email_alert(msg)
                         
-                        if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                            send_webhook_alert(recipient.webhook_url, "Mail Delivery Delay Alert", msg, recipient.email, status="Open")
+                        if recipient.webhook_alerts_enabled:
+                            url = CONFIG['WEBHOOK_URL'] or recipient.webhook_url
+                            if url:
+                                send_webhook_alert(url, "Mail Delivery Delay Alert", msg, recipient.email, status="Open")
                         
                         increment_counter('alert_sent', session_provided=session)
                         recipient.alert_active = True

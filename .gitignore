@@ -6,3 +6,5 @@ data/
 data-web/
 test_headers.txt
 __pycache__/
+bandit-report.html
+bandit_report.json
