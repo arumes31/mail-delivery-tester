@@ -1884,7 +1884,6 @@ def mask_email(email):
 
 @app.route('/api/stats/overview')
 def api_stats_overview():
-    global STATS_CACHE
     now = datetime.datetime.utcnow()
     is_logged_in = 'logged_in' in session
     

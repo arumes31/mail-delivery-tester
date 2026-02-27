@@ -6525,7 +6525,6 @@ This can lead to an internal information disclosure. This test shows potential h
         }
 
 def opts(argv):
-    global options
     global logger
 
     o = argparse.ArgumentParser(

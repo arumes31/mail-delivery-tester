@@ -57,4 +57,4 @@ atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':
     # Fallback for manual execution
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5001)  # nosec B104
