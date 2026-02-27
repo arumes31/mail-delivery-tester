@@ -485,7 +485,7 @@ def send_probe_email():
                             if recipient.email_alerts_enabled:
                                 send_email_alert(msg_rec)
                             if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                                send_webhook_alert(recipient.webhook_url, "Mail Delivery Recovered", msg_rec)
+                                send_webhook_alert(recipient.webhook_url, "Mail Delivery Recovered", msg_rec, recipient.email)
                             recipient.alert_active = False
                     
                     # Update next send time
@@ -515,7 +515,7 @@ def send_probe_email():
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
                         if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                            send_webhook_alert(recipient.webhook_url, "Mail Delivery Alert", err_msg)
+                            send_webhook_alert(recipient.webhook_url, "Mail Delivery Alert", err_msg, recipient.email)
                         recipient.alert_active = True
                     
                     # Still update next send time
@@ -609,7 +609,7 @@ def check_inbox():
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
                                             if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                                                send_webhook_alert(recipient.webhook_url, "Mail Delivery Check Recovered", msg_rec)
+                                                send_webhook_alert(recipient.webhook_url, "Mail Delivery Check Recovered", msg_rec, recipient.email)
                                             recipient.alert_active = False
 
                                         probe.status = 'RECEIVED'
@@ -765,14 +765,19 @@ def send_email_alert(message):
     except Exception as e:
         logger.error(f"[DEBUG] Failed to send email alert: {e}")
 
-def send_webhook_alert(webhook_url, subject, description):
+def send_webhook_alert(webhook_url, subject, description, recipient_email=None):
     """Sends a JSON webhook alert."""
     if not webhook_url:
         return
 
+    tenant = ""
+    if recipient_email and '@' in recipient_email:
+        tenant = recipient_email.split('@')[1]
+
     payload = {
         "subject": subject,
         "description": description,
+        "Tenant": tenant,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
     }
 
@@ -828,7 +833,7 @@ def check_delays():
                             send_email_alert(msg)
                         
                         if recipient.webhook_alerts_enabled and recipient.webhook_url:
-                            send_webhook_alert(recipient.webhook_url, "Mail Delivery Delay Alert", msg)
+                            send_webhook_alert(recipient.webhook_url, "Mail Delivery Delay Alert", msg, recipient.email)
                         
                         increment_counter('alert_sent', session_provided=session)
                         recipient.alert_active = True
