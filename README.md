@@ -31,7 +31,17 @@ MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify
 - **🌐 Web-Check**: Integrated OSINT tool for comprehensive website analysis.
 - **Multi-Recipient Support**: Monitor multiple target mailboxes simultaneously with individual schedules.
 - **Smart Alerting**: 
-    - Notifications via **Discord Webhooks**, **Email**, and **ConnectWise Manage Tickets**.
+    - Notifications via **Discord Webhooks**, **Email**, and **Custom JSON Webhooks**.
+      *Example Webhook Payload:*
+      ```json
+      {
+        "subject": "Mail Delivery Alert",
+        "description": "Probe 12345 to user@example.com is delayed by over 300s.",
+        "Tenant": "example.com",
+        "Status": "Open",
+        "timestamp": "2026-02-27T10:15:30Z"
+      }
+      ```
     - Alert on **Missing** emails, **Send Failures**, and **Service Recovery**.
 - **Resilient Infrastructure**:
     - **PostgreSQL 17**: High-performance persistence with host-mapped volume.
@@ -68,7 +78,8 @@ cp .env.example .env
 - `DB_USER` / `DB_PASS` / `DB_NAME`: PostgreSQL credentials.
 - `ADMIN_USER` / `ADMIN_PASSWORD`: Credentials for the web UI.
 - `ENABLE_PROXY`: Set to `true` if running behind a reverse proxy.
-- `CW_URL`, `CW_CLIENT_ID`, `CW_PUBLIC_KEY`, `CW_PRIVATE_KEY`: ConnectWise Manage API credentials for ticket alerting.
+- `WEBHOOK_URL`: Global URL endpoint for custom JSON webhook alerts.
+- `WEBHOOK_TIMEOUT`: Timeout in seconds for custom JSON webhooks (default: 10).
 
 ### 3. Start the Application
 
