@@ -36,10 +36,17 @@ MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify
       ```json
       {
         "subject": "Mail Delivery Alert",
-        "description": "Probe 12345 to user@example.com is delayed by over 300s.",
+        "description": "Probe 1234-abcd to user@example.com is delayed by over 300s.",
+        "event_type": "DeliveryDelay",
+        "recipient_email": "user@example.com",
+        "probe_guid": "1234-abcd",
         "Tenant": "example.com",
         "Status": "Open",
-        "timestamp": "2026-02-27T10:15:30Z"
+        "timestamp": "2026-02-27T10:15:30Z",
+        "metadata": {
+          "threshold_seconds": 300,
+          "sent_at": "2026-02-27T10:10:30Z"
+        }
       }
       ```
     - Alert on **Missing** emails, **Send Failures**, and **Service Recovery**.
