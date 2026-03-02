@@ -665,6 +665,27 @@ def check_inbox():
                                         if probe.dmarc_status == 'fail':
                                             increment_counter('dmarc_fail', session_provided=session)
 
+                                        # Trigger Alerts for Auth Failures & Unknowns
+                                        auth_issues = []
+                                        if probe.spf_status in ['fail', 'unknown']: auth_issues.append(f"SPF: {probe.spf_status}")
+                                        if probe.dkim_status in ['fail', 'unknown']: auth_issues.append(f"DKIM: {probe.dkim_status}")
+                                        if probe.dmarc_status in ['fail', 'unknown']: auth_issues.append(f"DMARC: {probe.dmarc_status}")
+
+                                        if auth_issues:
+                                            recipient = rec_map.get(probe.recipient_email)
+                                            if recipient:
+                                                issue_summary = ", ".join(auth_issues)
+                                                err_msg = f"⚠️ **Mail Authentication Alert**\nProbe `{probe.guid}` to `{probe.recipient_email}` returned with auth issues.\n**{issue_summary}**\nHeaders: \n```{combined_auth[:1000]}```"
+                                                
+                                                if recipient.discord_alerts_enabled:
+                                                    send_discord_alert(err_msg)
+                                                if recipient.email_alerts_enabled:
+                                                    send_email_alert(err_msg)
+                                                if recipient.webhook_alerts_enabled:
+                                                    url = CONFIG['WEBHOOK_URL'] or recipient.webhook_url
+                                                    if url:
+                                                        send_webhook_alert(url, "Mail Authentication Alert", err_msg, recipient.email, status="Warning")
+
                                         probe.status = 'RECEIVED'
                                         increment_counter('mail_received', session_provided=session)
                                         session.commit()
