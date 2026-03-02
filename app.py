@@ -493,7 +493,7 @@ def send_probe_email():
                             if recipient.email_alerts_enabled:
                                 send_email_alert(msg_rec)
                             if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
-                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Recovered", msg_rec, recipient.email, status="Closed")
+                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Recovered", msg_rec, recipient.email, status="Closed", event_type="Recovery", probe_guid=probe_guid)
                             recipient.alert_active = False
                     
                     # Update next send time
@@ -523,7 +523,7 @@ def send_probe_email():
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
                         if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
-                            send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Alert", err_msg, recipient.email, status="Open")
+                            send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Alert", err_msg, recipient.email, status="Open", event_type="SendFailure", probe_guid=probe_guid, metadata={"error": str(send_err)})
                         recipient.alert_active = True
                     
                     # Still update next send time
@@ -617,7 +617,7 @@ def check_inbox():
                                             if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
                                             if recipient.email_alerts_enabled: send_email_alert(msg_rec)
                                             if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
-                                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed")
+                                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed", event_type="Recovery", probe_guid=probe.guid, metadata={"latency_seconds": probe.latency})
                                             recipient.alert_active = False
 
                                         auth_headers = []
@@ -664,6 +664,28 @@ def check_inbox():
                                             increment_counter('dkim_fail', session_provided=session)
                                         if probe.dmarc_status == 'fail':
                                             increment_counter('dmarc_fail', session_provided=session)
+
+                                        # Trigger Alerts for Auth Failures & Unknowns
+                                        auth_issues = []
+                                        if probe.spf_status in ['fail', 'unknown']:
+                                            auth_issues.append(f"SPF: {probe.spf_status}")
+                                        if probe.dkim_status in ['fail', 'unknown']:
+                                            auth_issues.append(f"DKIM: {probe.dkim_status}")
+                                        if probe.dmarc_status in ['fail', 'unknown']:
+                                            auth_issues.append(f"DMARC: {probe.dmarc_status}")
+
+                                        if auth_issues and recipient:
+                                            issue_summary = ", ".join(auth_issues)
+                                            err_msg = f"⚠️ **Mail Authentication Alert**\nProbe `{probe.guid}` to `{probe.recipient_email}` returned with auth issues.\n**{issue_summary}**\nHeaders: \n```{combined_auth[:1000]}```"
+                                            
+                                            if recipient.discord_alerts_enabled:
+                                                send_discord_alert(err_msg)
+                                            if recipient.email_alerts_enabled:
+                                                send_email_alert(err_msg)
+                                            if recipient.webhook_alerts_enabled:
+                                                url = CONFIG['WEBHOOK_URL'] or recipient.webhook_url
+                                                if url:
+                                                    send_webhook_alert(url, "Mail Authentication Alert", err_msg, recipient.email, status="Warning", event_type="AuthFailure", probe_guid=probe.guid, metadata={"spf": probe.spf_status, "dkim": probe.dkim_status, "dmarc": probe.dmarc_status})
 
                                         probe.status = 'RECEIVED'
                                         increment_counter('mail_received', session_provided=session)
@@ -818,7 +840,7 @@ def send_email_alert(message):
     except Exception as e:
         logger.error(f"[DEBUG] Failed to send email alert: {e}")
 
-def send_webhook_alert(webhook_url, subject, description, recipient_email=None, status="Open"):
+def send_webhook_alert(webhook_url, subject, description, recipient_email=None, status="Open", event_type="Unknown", probe_guid=None, metadata=None):
     """Sends a JSON webhook alert."""
     if not webhook_url:
         return
@@ -834,9 +856,13 @@ def send_webhook_alert(webhook_url, subject, description, recipient_email=None, 
     payload = {
         "subject": subject,
         "description": description,
+        "event_type": event_type,
+        "recipient_email": recipient_email,
+        "probe_guid": probe_guid,
         "Tenant": tenant,
         "Status": status,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "metadata": metadata or {}
     }
 
     try:
@@ -893,7 +919,7 @@ def check_delays():
                         if recipient.webhook_alerts_enabled:
                             url = CONFIG['WEBHOOK_URL'] or recipient.webhook_url
                             if url:
-                                send_webhook_alert(url, "Mail Delivery Delay Alert", msg, recipient.email, status="Open")
+                                send_webhook_alert(url, "Mail Delivery Delay Alert", msg, recipient.email, status="Open", event_type="DeliveryDelay", probe_guid=probe.guid, metadata={"threshold_seconds": threshold, "sent_at": probe.sent_at.isoformat() + "Z"})
                         
                         increment_counter('alert_sent', session_provided=session)
                         recipient.alert_active = True
