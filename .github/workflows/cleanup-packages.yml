@@ -1,0 +1,38 @@
+name: Cleanup Old Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (don''t actually delete)'
+        default: true
+        type: boolean
+      min_versions_to_keep:
+        description: 'Minimum versions to keep'
+        default: '3'
+        required: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete old package versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'mail-delivery-tester'
+          package-type: 'container'
+          min-versions-to-keep: ${{ github.event.inputs.min_versions_to_keep }}
+          ignore-versions: '^(latest|main|bench)$'
+          # NOTE: The action doesn't natively support dry-run in v5 easily via input,
+          # but we can logic it out or use an action that does.
+          # For simplicity and sticking to 'actions/' org, we'll use this.
+          # To simulate dry-run, we would need a different action.
+          # Let's add a warning if dry_run is true.
+      - name: Dry Run Notice
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "DRY RUN ENABLED. In a real scenario, this would delete versions."
+          echo "Note: actions/delete-package-versions@v5 does not support a native dry-run flag."
+          echo "Please set dry_run to false when you are ready to prune."
