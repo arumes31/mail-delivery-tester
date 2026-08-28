@@ -1,5 +1,5 @@
-import re
 import datetime
+import re
 from email.utils import parsedate_to_datetime
 
 # --- Comprehensive Lookup Tables ---
@@ -100,13 +100,15 @@ class SpamDecoder:
                     bcl = int(msas.split('BCL:')[1].split(';')[0])
                     desc, status = get_status(bcl, MS_BCL)
                     self._add('O365 BCL', desc, status)
-                except: pass
+                except (IndexError, TypeError, ValueError):
+                    pass
             if 'PCL:' in msas:
                 try:
                     pcl = int(msas.split('PCL:')[1].split(';')[0])
                     desc, status = get_status(pcl, MS_PCL)
                     self._add('O365 PCL', desc, status)
-                except: pass
+                except (IndexError, TypeError, ValueError):
+                    pass
 
     def _test_spamassassin(self):
         status = self.headers.get('x-spam-status', '')
@@ -169,7 +171,8 @@ class SpamDecoder:
                 age = (datetime.datetime.now(datetime.timezone.utc) - sent_dt).total_seconds()
                 if age > 3600:
                     self._add('Latency', f'Message is {int(age/60)}m old', 'warning')
-            except: pass
+            except (TypeError, ValueError):
+                pass
 
 def decode_spam_headers(headers_dict):
     decoder = SpamDecoder(headers_dict)

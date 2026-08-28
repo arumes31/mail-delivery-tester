@@ -1,11 +1,18 @@
-import os
-import logging
-from flask import Flask
-from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
+
 from apscheduler.executors.pool import ThreadPoolExecutor
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask
+
 from app import (
-    CONFIG, logger, run_migrations, reset_alert_states,
-    send_probe_email, check_inbox, check_delays, cleanup_old_probes
+    CONFIG,
+    check_delays,
+    check_inbox,
+    cleanup_old_probes,
+    logger,
+    reset_alert_states,
+    run_migrations,
+    send_probe_email,
 )
 
 # Create a minimal Flask app for Gunicorn to run
@@ -52,7 +59,6 @@ logger.info("Scheduler starting...")
 scheduler.start()
 
 # Shutdown scheduler on process exit
-import atexit
 atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':

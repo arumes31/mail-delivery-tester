@@ -107,7 +107,11 @@
         document.getElementById('transcript').innerHTML = 'Connecting...';
         document.getElementById('overall-time').innerText = '';
 
-        fetch(`/api/diagnostics/smtp-test?host=${encodeURIComponent(host)}&port=${port}`)
+        fetch('/api/diagnostics/smtp-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, port: Number(port) })
+        })
             .then(res => {
                 if (res.status === 429) {
                     return res.json().then(d => { 
@@ -115,7 +119,10 @@
                         throw new Error(d.message); 
                     });
                 }
-                return res.json();
+                return res.json().then(data => {
+                    if (!res.ok) throw new Error(data.error || 'SMTP diagnostic failed');
+                    return data;
+                });
             })
             .then(data => {
                 btn.disabled = false;
