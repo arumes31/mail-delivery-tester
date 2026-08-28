@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 127
+extend-exclude = [
+  "decode_spam_headers_official.py", # vendored upstream decoder; wrapped and regression-tested locally
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = [
+  "E701", # legacy compact control flow; tracked separately from correctness/security gates
+  "E712", # SQLAlchemy comparisons intentionally compile to SQL
+  "E721", # legacy environment helper; behavior covered by tests
+]
+
+[tool.bandit]
+exclude_dirs = [".venv", "tests", "graphify-out"]
+skips = []

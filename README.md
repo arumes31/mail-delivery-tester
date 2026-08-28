@@ -1,133 +1,144 @@
-# MailDT - Mail Delivery Monitor
+# MailDT — Mail Delivery Monitor
 
-[![Build and Publish Docker Image](https://github.com/arumes31/mail-delivery-tester/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/docker-publish.yml)
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://github.com/arumes31/mail-delivery-tester/pkgs/container/mail-delivery-tester)
-![Python Version](https://img.shields.io/badge/python-3.14-blue.svg)
-![License](https://img.shields.io/github/license/arumes31/mail-delivery-tester)
-![Repo Size](https://img.shields.io/github/repo-size/arumes31/mail-delivery-tester)
-[![Security Scan](https://github.com/arumes31/mail-delivery-tester/actions/workflows/security-scan.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/security-scan.yml)
+[![Python CI](https://github.com/arumes31/mail-delivery-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/ci.yml)
+[![Container](https://github.com/arumes31/mail-delivery-tester/actions/workflows/container.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/container.yml)
+[![CodeQL](https://github.com/arumes31/mail-delivery-tester/actions/workflows/codeql.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/codeql.yml)
 
-<p align="center">
-  <img src="static/img/logo.svg" width="120" alt="MailDT Logo">
-</p>
+MailDT is a self-hosted SMTP/IMAP delivery monitor. It sends unique probes, watches for their return, measures delivery latency, checks SPF/DKIM/DMARC signals, and exposes authenticated operational diagnostics.
 
-MailDT is a robust, self-hosted mail delivery monitoring tool designed to verify the reliability, latency, and authentication health of your email infrastructure. It performs "loopback" testing by sending unique probes via SMTP and watching for their arrival via IMAP.
+## Security model
 
-## 🚀 Features
+MailDT intentionally fails closed:
 
-- **Round-Trip Monitoring**: Automated probes to track **RTT (Round Trip Time)** and delivery reliability.
-- **Enhanced Live Monitor**: Real-time dashboard showing status, RTT, and **SPF/DKIM/DMARC** results.
-- **📊 Sidebar Analytics**: Persistent, real-time widget showing mail and tool usage stats for the last hour, 24h, and all-time.
-- **📌 Custom Dashboard Widgets**: Fully customizable home page "pins" with icons or custom images, supporting reordering, private visibility, and various sizes.
-- **🎨 Cyber-Purple Aesthetic**: Permanent dark mode with a modern purple/indigo palette, neon accents, and a dynamic SVG mesh background.
-- **🛡️ Privacy & Public Access**: 
-    - **Email Masking**: Recipient addresses are automatically masked for unauthenticated users.
-    - **Public Tools**: Mail Tester, SMTP Diagnostics, and Blacklist Check are accessible without login.
-- **🧪 Mail Tester**: Diagnostic tool (similar to mail-tester.com) to manually verify SPF, DKIM, DMARC, and detailed spam headers (O365, Mimecast, Proofpoint, etc.).
-- **🩺 SMTP Diagnostics**: Public protocol analyzer with session transcripts, banner checks, TLS verification, and open relay testing.
-- **🛡️ Blacklist Check**: Deep DNSBL analysis for domains and their MX nodes against 15+ major providers.
-- **🔍 Decode Spam Headers**: Integrated official engine for analyzing 67+ raw email header types.
-- **🔍 WHOIS Lookup**: Embedded integration for external domain and IP information.
-- **🌐 Web-Check**: Integrated OSINT tool for comprehensive website analysis.
-- **Multi-Recipient Support**: Monitor multiple target mailboxes simultaneously with individual schedules.
-- **Smart Alerting**: 
-    - Notifications via **Discord Webhooks**, **Email**, and **Custom JSON Webhooks**.
-      *Example Webhook Payload:*
-      ```json
-      {
-        "subject": "Mail Delivery Alert",
-        "description": "Probe 1234-abcd to user@example.com is delayed by over 300s.",
-        "event_type": "DeliveryDelay",
-        "recipient_email": "user@example.com",
-        "probe_guid": "1234-abcd",
-        "Tenant": "example.com",
-        "Status": "Open",
-        "timestamp": "2026-02-27T10:15:30Z",
-        "metadata": {
-          "threshold_seconds": 300,
-          "sent_at": "2026-02-27T10:10:30Z"
-        }
-      }
-      ```
-    - Alert on **Missing** emails, **Send Failures**, and **Service Recovery**.
-- **Resilient Infrastructure**:
-    - **PostgreSQL 17**: High-performance persistence with host-mapped volume.
-    - **Persistent Metrics**: Global counters and event logging ensure statistics survive data cleanups and recipient deletions.
-    - **Smart DNS**: Multi-provider DNS resolution with Google DNS fallback for reliable PTR lookups.
-    - **Performance**: Intelligent 120s caching for public users with real-time bypass for admins.
-- **Security**: **2FA (TOTP)** support for admin access and IP-based rate limiting across all diagnostic tools.
+- the database password, Flask signing key, administrator name, and administrator password have no defaults
+- deployment secrets can be mounted from files and the supplied Compose stacks do so
+- changing the signing key, administrator password, user, or TOTP secret invalidates every existing session
+- authentication stores a versioned user identity, not a forgeable `logged_in` boolean
+- TOTP handoff state expires after five minutes and never stores or returns the submitted password
+- session cookies are always `Secure`, `HttpOnly`, and `SameSite=Lax`; deploy behind HTTPS
+- forwarded client/scheme/host headers are accepted only from `TRUSTED_PROXY_CIDRS`
+- state-changing administrator operations require a session-bound CSRF token
+- SMTP diagnostics require authentication, an exact host/port allowlist, and a public DNS result; IP literals, loopback, private, link-local, multicast, unspecified, reserved, and mixed public/private answers are rejected
+- the validated SMTP IP is dialed directly, preventing a second DNS lookup from rebinding the connection
+- decoder HTTP requests require HTTPS, do not follow redirects, have connect/read deadlines, and reject responses above 512 KiB
+- the container runs as UID/GID 65532, has no runtime package manager, and is deployed read-only with all Linux capabilities dropped
 
-## Screenshots
+The normal configured SMTP/IMAP monitor can reach private mail infrastructure. The interactive SMTP diagnostic is deliberately stricter because it accepts a browser-supplied target.
 
-<img width="2543" height="689" alt="grafik" src="https://github.com/user-attachments/assets/1a2c5631-4385-490a-8baf-512dd6262f99" />
-<img width="2519" height="1013" alt="grafik" src="https://github.com/user-attachments/assets/9c6a109e-d20b-471b-9e57-8364f17d5c3b" />
-<img width="2519" height="1220" alt="grafik" src="https://github.com/user-attachments/assets/cd2d1402-62cc-4f85-b9c7-25b2609d1ecf" />
-<img width="2521" height="1250" alt="grafik" src="https://github.com/user-attachments/assets/b81a3dfe-6cad-428b-82d9-97a65eac6dfa" />
-<img width="2553" height="1259" alt="grafik" src="https://github.com/user-attachments/assets/b7e6605b-d462-4594-b79b-47fb296cfe34" />
-<img width="2523" height="609" alt="grafik" src="https://github.com/user-attachments/assets/e9cc48d7-c34a-4dbd-8eaf-f70688693a7e" />#
-<img width="2529" height="873" alt="grafik" src="https://github.com/user-attachments/assets/bbc51734-e3b7-4212-8de0-6931961e0828" />
+## Required migration from an older deployment
 
-## 🛠️ Setup & Installation
+Do this before deploying the updated Compose file:
 
-### 1. Prerequisites
-- Docker and Docker Compose installed.
-- A dedicated mail account for monitoring (SMTP and IMAP access).
+1. Back up `data/`, `data-web/`, and the current `.env` without placing the backup in the repository.
+2. Rotate the old Flask `SECRET_KEY` and administrator password. Reusing either documented default is rejected. The new signing key invalidates all old browser sessions.
+3. If the database still uses the example password, rotate the PostgreSQL role interactively before replacing the secret. Avoid putting the new password in shell history or a process argument.
+4. Rotate SMTP/IMAP credentials if example or previously disclosed values were used.
+5. Create the secret files below with restrictive host permissions.
+6. Replace `.env` from `.env.example`; remove legacy `DB_PASS`, `SECRET_KEY`, `ADMIN_PASSWORD`, `SMTP_PASS`, and `IMAP_PASS` entries so they do not conflict with mounted files.
+7. Ensure the existing `data-web/` bind mount is writable by UID/GID 65532 on Linux.
+8. Configure HTTPS and the narrow immediate-proxy CIDR before exposing the service.
 
-### 2. Configuration
-Copy the example environment file and fill in your credentials:
+Example secret provisioning on Linux/macOS:
+
+```bash
+install -d -m 700 secrets
+openssl rand -base64 48 > secrets/session_key
+openssl rand -base64 32 > secrets/admin_password
+openssl rand -base64 32 > secrets/db_password
+printf '%s\n' 'your-smtp-password' > secrets/smtp_password
+printf '%s\n' 'your-imap-password' > secrets/imap_password
+: > secrets/admin_totp # leave empty to disable TOTP
+chmod 600 secrets/*
+sudo chown -R 65532:65532 data-web
+```
+
+To enable TOTP, put a valid base32 secret in `secrets/admin_totp` before starting the stack. Generate it locally with a trusted password manager/authenticator enrollment workflow and do not commit it.
+
+For an existing PostgreSQL role, an interactive rotation avoids exposing the password in command arguments:
+
+```bash
+docker compose exec db psql -U maildt -d maildt -c '\password maildt'
+```
+
+Write that same new value to `secrets/db_password`, then deploy the updated stack. If the database username differs, substitute it in both places.
+
+## Deployment
 
 ```bash
 cp .env.example .env
+# edit non-secret settings and provision ./secrets as described above
+docker compose pull
+docker compose up -d
+docker compose ps
 ```
 
-**Key Environment Variables:**
-- `SMTP_HOST` / `IMAP_HOST`: Your mail server addresses.
-- `DB_USER` / `DB_PASS` / `DB_NAME`: PostgreSQL credentials.
-- `ADMIN_USER` / `ADMIN_PASSWORD`: Credentials for the web UI.
-- `ENABLE_PROXY`: Set to `true` if running behind a reverse proxy.
-- `WEBHOOK_URL`: Global URL endpoint for custom JSON webhook alerts.
-- `WEBHOOK_TIMEOUT`: Timeout in seconds for custom JSON webhooks (default: 10).
-
-### 3. Start the Application
-
-#### Option A: Local Build (Recommended for development)
-```bash
-docker-compose up -d --build
-```
-
-#### Option B: Use Pre-built Images (Recommended for production)
-If you don't want to clone the full repository, you can just download the necessary files and run:
+Use `docker-compose.ghcr.yml` to run the published image:
 
 ```bash
-# Download the compose file and example environment
-curl -L -O https://raw.githubusercontent.com/arumes31/mail-delivery-tester/main/docker-compose.ghcr.yml
-curl -L -O https://raw.githubusercontent.com/arumes31/mail-delivery-tester/main/.env.example
-
-# Setup your environment
-cp .env.example .env
-# ... edit .env with your credentials ...
-
-# Start the application
-docker-compose -f docker-compose.ghcr.yml up -d
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-Access the dashboard at `http://localhost:5000`. Persistent data will be stored in the `./data` folder on your host.
+The web port binds to `127.0.0.1:5000` by default. Keep it loopback-only and terminate TLS in a reverse proxy. If the immediate proxy connects from `172.20.0.5`, for example, use its narrow address or subnet:
 
-## 🖥️ Navigation
+```dotenv
+TRUSTED_PROXY_CIDRS=172.20.0.5/32
+```
 
-- **Live Monitor**: Publicly viewable health and authentication status (masked emails).
-- **Mail Tester**: Public manual verification of mail headers and spam scores.
-- **SMTP Diagnostics**: Public deep protocol analysis and session transcripts.
-- **Blacklist Check**: Public reputation scanning for domains and IPs.
-- **Decode Spam Headers**: Deep analysis of raw email headers.
-- **WHOIS Lookup**: Public embedded WHOIS information service.
-- **Web-Check**: Public embedded website analysis tool.
-- **System Diagnostics**: (Admin) Internal health check of your configured SMTP/IMAP credentials.
-- **Recipients**: (Admin) Manage target addresses and alert thresholds.
+Do not set a broad public CIDR. When no proxy is used, leave `TRUSTED_PROXY_CIDRS` empty; forwarded headers will be ignored.
 
-## 📦 Tech Stack
-- **Backend**: Python (Flask)
-- **Database**: PostgreSQL 17 / SQLAlchemy
-- **Diagnostics**: `dnspython`, `socket`
-- **Frontend**: Bootstrap 5 (Dark), FontAwesome 6, Custom Cyber-Purple CSS
-- **Messaging**: `smtplib`, `imaplib`
+### SMTP diagnostic egress policy
+
+Only configured hosts and ports are eligible:
+
+```dotenv
+SMTP_DIAGNOSTIC_ALLOWED_HOSTS=smtp1.example.com,smtp2.example.com
+SMTP_DIAGNOSTIC_ALLOWED_PORTS=25,465,587
+```
+
+Every DNS answer must be globally routable. Use network-level egress policy as an additional control. If the production SMTP host is private, normal probe delivery still works, but the interactive diagnostic will reject it.
+
+## Configuration
+
+The full non-secret template is [.env.example](.env.example). Important settings include:
+
+| Setting | Purpose |
+|---|---|
+| `ADMIN_USER` | Required administrator identity |
+| `TRUSTED_PROXY_CIDRS` | Exact immediate peers allowed to supply forwarded headers |
+| `SMTP_DIAGNOSTIC_ALLOWED_HOSTS` | Exact interactive diagnostic hostname allowlist |
+| `SMTP_DIAGNOSTIC_ALLOWED_PORTS` | Interactive diagnostic port allowlist |
+| `SEND_INTERVAL` | Probe-send interval in seconds |
+| `CHECK_INTERVAL` | IMAP polling interval in seconds |
+| `ALERT_THRESHOLD` | Delay threshold in seconds |
+
+The Compose stack mounts `DB_PASS_FILE`, `SECRET_KEY_FILE`, `ADMIN_PASSWORD_FILE`, `ADMIN_TOTP_SECRET_FILE`, `SMTP_PASS_FILE`, and `IMAP_PASS_FILE` inside the containers. Direct environment variables remain supported for non-Compose deployments, but setting both forms for one secret is rejected.
+
+## Development and verification
+
+Python 3.14 is the supported runtime. Dependencies are exact and hash-locked.
+
+```bash
+uv venv
+uv pip install --python .venv/bin/python --require-hashes -r requirements-dev.txt
+.venv/bin/ruff check .
+.venv/bin/pytest --cov=security --cov=http_utils --cov-fail-under=85
+.venv/bin/bandit -c pyproject.toml -r app.py scheduler.py spam_decoder.py decode_wrapper.py security.py http_utils.py -ll -ii
+.venv/bin/pip-audit -r requirements.txt
+```
+
+Refresh locks only after reviewing upstream changes:
+
+```bash
+uv pip compile requirements.in --python-version 3.14 --generate-hashes --output-file requirements.txt
+uv pip compile requirements-dev.in --python-version 3.14 --generate-hashes --output-file requirements-dev.txt
+```
+
+`decode_spam_headers_official.py` is a vendored upstream decoder and is excluded from the first-party Ruff baseline. Local security fixes are intentionally narrow: duplicate-key removal and bounded HTTPS fetching. Keep its upstream source/version documented when replacing it, and rerun decoder fixtures plus the full security suite.
+
+## Reporting vulnerabilities
+
+See [SECURITY.md](SECURITY.md). Do not publish credentials, session cookies, email content, or diagnostic transcripts in a public issue.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

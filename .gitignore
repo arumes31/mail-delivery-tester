@@ -1,6 +1,5 @@
 autobuild.sh
 redis-data/dump.rdb
-.dockerignore
 .env
 data/
 data-web/
@@ -8,3 +7,12 @@ test_headers.txt
 __pycache__/
 bandit-report.html
 bandit_report.json
+.coverage
+.pytest_cache/
+.ruff_cache/
+.venv/
+coverage.xml
+graphify-out/
+.pytest-tmp/
+tests/*.sqlite3
+secrets/

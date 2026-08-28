@@ -1,31 +1,62 @@
-import os
-import sys
-import re
-import uuid
-import smtplib
-import ssl
-import imaplib
-import email
-import logging
-import requests
 import datetime
-import base64
-import pyotp
+import email
+import hmac
+import imaplib
 import json
-import dns.resolver
+import logging
+import os
+import re
+import secrets
+import smtplib
 import socket
-import time
+import ssl
 import subprocess  # nosec
+import sys
 import tempfile
-from spam_decoder import decode_spam_headers
-from functools import wraps
-from email.mime.text import MIMEText
+import time
+import uuid
 from email.header import decode_header
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, send_from_directory
-from werkzeug.middleware.proxy_fix import ProxyFix
+from email.mime.text import MIMEText
+from functools import wraps
+from urllib.parse import quote_plus
+
+import dns.exception
+import dns.resolver
+import pyotp
+import requests
+from flask import (
+    Flask,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, desc
+from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
 from werkzeug.utils import secure_filename
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, desc
-from sqlalchemy.orm import scoped_session, sessionmaker, declarative_base
+
+from security import (
+    SMTPDestinationError,
+    TrustedProxyMiddleware,
+    parse_allowed_hosts,
+    parse_allowed_ports,
+    parse_cidrs,
+    read_optional_secret,
+    read_secret,
+    resolve_smtp_destination,
+    safe_local_redirect,
+    session_version,
+)
+from spam_decoder import decode_spam_headers
+
+
+def utc_now():
+    """Return a naive UTC timestamp for the existing database schema."""
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+
 
 # --- Configuration ---
 def get_env_var(name, default=None, var_type=str):
@@ -45,38 +76,64 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Construct default Database URL from components
 db_user = get_env_var('DB_USER', 'maildt')
-db_pass = get_env_var('DB_PASS', 'securepassword')
 db_host = get_env_var('DB_HOST', 'db')
 db_port = get_env_var('DB_PORT', '5432')
 db_name = get_env_var('DB_NAME', 'maildt')
-default_db_url = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+database_url = get_env_var('DATABASE_URL')
+if database_url:
+    default_db_url = database_url
+else:
+    db_pass = read_secret('DB_PASS', minimum_length=16)
+    default_db_url = (
+        f"postgresql://{quote_plus(db_user)}:{quote_plus(db_pass)}@"
+        f"{db_host}:{db_port}/{quote_plus(db_name)}"
+    )
+
+secret_key = read_secret('SECRET_KEY', minimum_length=32)
+admin_user = get_env_var('ADMIN_USER')
+if not admin_user or len(admin_user) > 128:
+    raise RuntimeError('ADMIN_USER is required and must be at most 128 characters')
+admin_password = read_secret('ADMIN_PASSWORD', minimum_length=16)
+admin_totp_secret = read_optional_secret('ADMIN_TOTP_SECRET')
 
 CONFIG = {
-    'DATABASE_URL': get_env_var('DATABASE_URL', default_db_url), 
+    'DATABASE_URL': default_db_url,
     'SMTP_HOST': get_env_var('SMTP_HOST'),
     'SMTP_PORT': get_env_var('SMTP_PORT', 465, int),
     'SMTP_USER': get_env_var('SMTP_USER'),
-    'SMTP_PASS': get_env_var('SMTP_PASS'),
+    'SMTP_PASS': read_optional_secret('SMTP_PASS'),
     'IMAP_HOST': get_env_var('IMAP_HOST'),
     'IMAP_PORT': get_env_var('IMAP_PORT', 993, int),
     'IMAP_USER': get_env_var('IMAP_USER'),
-    'IMAP_PASS': get_env_var('IMAP_PASS'),
+    'IMAP_PASS': read_optional_secret('IMAP_PASS'),
     'SEND_INTERVAL': get_env_var('SEND_INTERVAL', 3600, int),
     'CHECK_INTERVAL': get_env_var('CHECK_INTERVAL', 30, int),
     'ALERT_THRESHOLD': get_env_var('ALERT_THRESHOLD', 900, int),
-    'DISCORD_WEBHOOK_URL': get_env_var('DISCORD_WEBHOOK_URL'),
+    'DISCORD_WEBHOOK_URL': read_optional_secret('DISCORD_WEBHOOK_URL'),
     'ALERT_MAIL_RECIPIENT': get_env_var('ALERT_MAIL_RECIPIENT'),
-    'ADMIN_USER': get_env_var('ADMIN_USER', 'admin'),
-    'ADMIN_PASSWORD': get_env_var('ADMIN_PASSWORD', 'admin'),
-    'ADMIN_TOTP_SECRET': get_env_var('ADMIN_TOTP_SECRET'),
-    'ENABLE_PROXY': get_env_var('ENABLE_PROXY', 'false', bool),
+    'ADMIN_USER': admin_user,
+    'ADMIN_PASSWORD': admin_password,
+    'ADMIN_TOTP_SECRET': admin_totp_secret,
+    'TRUSTED_PROXY_CIDRS': parse_cidrs(get_env_var('TRUSTED_PROXY_CIDRS')),
     'ENABLE_WHOIS': get_env_var('ENABLE_WHOIS', 'true', bool),
     'WHOIS_URL': get_env_var('WHOIS_URL', 'https://whois.reitetschlaeger.com'),
     'ENABLE_WEBCHECK': get_env_var('ENABLE_WEBCHECK', 'true', bool),
     'WEBCHECK_URL': get_env_var('WEBCHECK_URL', 'https://webcheck-512351112734521.reitetschlaeger.com/'),
-    'WEBHOOK_URL': get_env_var('WEBHOOK_URL'),
+    'WEBHOOK_URL': read_optional_secret('WEBHOOK_URL'),
     'WEBHOOK_TIMEOUT': get_env_var('WEBHOOK_TIMEOUT', 10, int),
 }
+CONFIG['SMTP_DIAGNOSTIC_ALLOWED_HOSTS'] = parse_allowed_hosts(
+    get_env_var('SMTP_DIAGNOSTIC_ALLOWED_HOSTS', CONFIG['SMTP_HOST'] or '')
+)
+CONFIG['SMTP_DIAGNOSTIC_ALLOWED_PORTS'] = parse_allowed_ports(
+    get_env_var('SMTP_DIAGNOSTIC_ALLOWED_PORTS', str(CONFIG['SMTP_PORT']))
+)
+AUTH_SESSION_VERSION = session_version(
+    secret_key,
+    CONFIG['ADMIN_USER'],
+    CONFIG['ADMIN_PASSWORD'],
+    CONFIG['ADMIN_TOTP_SECRET'] or '',
+)
 
 # --- Setup Logging ---
 SERVICE_NAME = os.environ.get('SERVICE_NAME', 'app')
@@ -92,7 +149,7 @@ def get_engine(url, max_retries=5, delay=5):
         try:
             e = create_engine(url, pool_pre_ping=True, pool_recycle=300)
             # Try to connect to verify
-            with e.connect() as conn:
+            with e.connect():
                 return e
         except Exception as err:
             if i == max_retries - 1:
@@ -108,7 +165,7 @@ class EmailProbe(Base):
     __tablename__ = 'email_probes'
     id = Column(Integer, primary_key=True)
     guid = Column(String(50), unique=True, index=True)
-    sent_at = Column(DateTime, default=datetime.datetime.utcnow)
+    sent_at = Column(DateTime, default=utc_now)
     received_at = Column(DateTime, nullable=True)
     status = Column(String(20), default='PENDING') # PENDING, RECEIVED, MISSING
     alert_sent = Column(Boolean, default=False)
@@ -123,7 +180,7 @@ class EmailProbe(Base):
         if self.received_at and self.sent_at:
             return (self.received_at - self.sent_at).total_seconds()
         elif self.sent_at:
-            return (datetime.datetime.utcnow() - self.sent_at).total_seconds()
+            return (utc_now() - self.sent_at).total_seconds()
         return 0
 
 class Recipient(Base):
@@ -133,7 +190,7 @@ class Recipient(Base):
     active = Column(Boolean, default=True)
     send_interval = Column(Integer, default=3600)
     alert_threshold = Column(Integer, default=900)
-    next_send_at = Column(DateTime, default=datetime.datetime.utcnow)
+    next_send_at = Column(DateTime, default=utc_now)
     email_alerts_enabled = Column(Boolean, default=True)
     discord_alerts_enabled = Column(Boolean, default=True)
     webhook_alerts_enabled = Column(Boolean, default=False)
@@ -144,7 +201,7 @@ class MailTest(Base):
     __tablename__ = 'mail_tests'
     id = Column(Integer, primary_key=True)
     test_id = Column(String(50), unique=True, index=True)
-    received_at = Column(DateTime, default=datetime.datetime.utcnow)
+    received_at = Column(DateTime, default=utc_now)
     subject = Column(String(255))
     sender = Column(String(120))
     body = Column(String)
@@ -158,14 +215,14 @@ class ToolUsage(Base):
     __tablename__ = 'tool_usage'
     id = Column(Integer, primary_key=True)
     tool_name = Column(String(50), index=True) # mail-tester, smtp-diag, blacklist
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
     ip = Column(String(50))
 
 class MetricEvent(Base):
     __tablename__ = 'metric_events'
     id = Column(Integer, primary_key=True)
     event_type = Column(String(20)) # 'sent', 'received', 'mail-tester', 'smtp-diag', 'blacklist'
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
 
 class GlobalCounter(Base):
     __tablename__ = 'global_counters'
@@ -176,7 +233,7 @@ class GlobalCounter(Base):
 class ActiveTestSignal(Base):
     __tablename__ = 'active_test_signals'
     test_id = Column(String(50), primary_key=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 class CustomWidget(Base):
     __tablename__ = 'custom_widgets'
@@ -332,10 +389,6 @@ def record_usage(tool_name):
     """Records a tool usage event in the database."""
     session_db = Session()
     try:
-        ip = request.remote_addr
-        if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
-            ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
-        
         # 1. Update Lifetime Total
         counter = session_db.query(GlobalCounter).filter_by(counter_name=tool_name).first()
         if not counter:
@@ -394,7 +447,7 @@ def send_probe_email():
     session = Session()
     try:
         # Get active recipients due for sending
-        now = datetime.datetime.utcnow()
+        now = utc_now()
         recipients = session.query(Recipient).filter(
             Recipient.active == True,
             Recipient.next_send_at <= now
@@ -455,7 +508,7 @@ def send_probe_email():
                             </div>
                             <div class="metric">
                                 <span class="label">Sent At</span>
-                                <span class="value">{datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</span>
+                                <span class="value">{utc_now().strftime('%Y-%m-%d %H:%M:%S')} UTC</span>
                             </div>
                         </div>
                         
@@ -558,7 +611,7 @@ def check_inbox():
         logger.warning("IMAP not configured. Skipping check.")
         return
 
-    now = datetime.datetime.utcnow()
+    now = utc_now()
     session = Session()
     try:
         # Cleanup expired signals (older than 10 mins)
@@ -609,7 +662,7 @@ def check_inbox():
                                 probe = session.query(EmailProbe).filter_by(guid=guid).first()
                                 if probe:
                                     if not probe.received_at:
-                                        probe.received_at = datetime.datetime.utcnow()
+                                        probe.received_at = utc_now()
                                         # Use cached recipient lookup
                                         recipient = rec_map.get(probe.recipient_email)
                                         if recipient and recipient.alert_active:
@@ -861,7 +914,7 @@ def send_webhook_alert(webhook_url, subject, description, recipient_email=None, 
         "probe_guid": probe_guid,
         "Tenant": tenant,
         "Status": status,
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": utc_now().isoformat() + "Z",
         "metadata": metadata or {}
     }
 
@@ -881,7 +934,7 @@ def check_delays():
     """Checks for emails sent > their specific alert_threshold ago that haven't arrived."""
     session = Session()
     try:
-        now = datetime.datetime.utcnow()
+        now = utc_now()
         
         # Cache all recipients to avoid N+1 queries in the loop
         recipients = session.query(Recipient).all()
@@ -943,7 +996,14 @@ def check_delays():
 
 # --- Flask App ---
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'maildt-default-secret-key-change-me')
+app.secret_key = secret_key
+app.config.update(
+    MAX_CONTENT_LENGTH=1024 * 1024,
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=8),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=True,
+)
 
 _app_initialized = False
 
@@ -971,35 +1031,86 @@ def health():
 
 @app.context_processor
 def inject_config():
-    return dict(config=CONFIG)
+    return dict(config=CONFIG, is_authenticated=is_authenticated())
 
-# Apply ProxyFix middleware if enabled
-if CONFIG['ENABLE_PROXY']:
-    app.wsgi_app = ProxyFix(
+# Forwarded headers are authoritative only from explicitly trusted immediate peers.
+if CONFIG['TRUSTED_PROXY_CIDRS']:
+    app.wsgi_app = TrustedProxyMiddleware(
         app.wsgi_app,
-        x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1
+        CONFIG['TRUSTED_PROXY_CIDRS'],
     )
+
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' "
+        "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; script-src 'self' "
+        "'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: "
+        "https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; "
+        "base-uri 'self'; form-action 'self'"
+    )
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+
+def is_authenticated():
+    return (
+        hmac.compare_digest(str(session.get('user', '')), CONFIG['ADMIN_USER'])
+        and hmac.compare_digest(
+            str(session.get('session_version', '')),
+            AUTH_SESSION_VERSION,
+        )
+    )
+
+
+def csrf_token():
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+
+def csrf_protected(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method in {'GET', 'HEAD', 'OPTIONS'}:
+            return f(*args, **kwargs)
+        expected = session.get('_csrf_token', '')
+        supplied = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token', '')
+        if not expected or not hmac.compare_digest(str(expected), str(supplied)):
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Invalid CSRF token'}), 403
+            return 'Invalid CSRF token', 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Check session for login
-        if 'logged_in' in session:
+        if is_authenticated():
             return f(*args, **kwargs)
         
         if request.is_json or request.path.startswith('/api/'):
              return jsonify({"error": "Unauthorized"}), 401
              
-        return redirect(url_for('login', next=request.url))
+        return redirect(url_for('login', next=request.full_path))
     return decorated_function
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     # Rate Limiting: 5 login attempts per minute per IP
     now = time.time()
-    ip = request.remote_addr
-    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
-        ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    ip = request.remote_addr or 'unknown'
 
     if ip not in LOGIN_ATTEMPTS:
         LOGIN_ATTEMPTS[ip] = []
@@ -1010,6 +1121,13 @@ def login():
         return render_template('login.html', error=f"Too many attempts. Please wait {retry_after}s.", show_totp=False, retry_after=retry_after)
 
     if request.method == 'POST':
+        expected_csrf = session.get('_csrf_token', '')
+        supplied_csrf = request.form.get('csrf_token', '')
+        if not expected_csrf or not hmac.compare_digest(expected_csrf, supplied_csrf):
+            return render_template(
+                'login.html', error='Invalid CSRF token', show_totp=False
+            ), 403
+
         username = request.form.get('username')
         password = request.form.get('password')
         totp_code = request.form.get('totp')
@@ -1017,38 +1135,58 @@ def login():
         # Track attempt
         LOGIN_ATTEMPTS[ip].append(now)
 
-        if username == CONFIG['ADMIN_USER'] and password == CONFIG['ADMIN_PASSWORD']:
-            # Password correct, now check if TOTP is needed
-            if CONFIG['ADMIN_TOTP_SECRET']:
-                if not totp_code:
-                    # Password ok but TOTP missing, show TOTP field
-                    # We pass back username/password as hidden fields or just re-validate
-                    # To keep it simple and secure, we'll ask them to enter credentials again with TOTP
-                    # or better: we can keep the password in memory for this session temporarily 
-                    # but easiest is to show the field and let them submit all 3.
-                    return render_template('login.html', show_totp=True, username=username, password=password)
-                
-                totp = pyotp.TOTP(CONFIG['ADMIN_TOTP_SECRET'])
-                if not totp.verify(totp_code):
-                    return render_template('login.html', error="Invalid TOTP code", show_totp=True, username=username, password=password)
-            
-            session['logged_in'] = True
-            next_url = request.args.get('next')
-            return redirect(next_url or url_for('index'))
+        pending_user = session.get('pending_totp_user')
+        pending_at = session.get('pending_totp_at', 0)
+        if pending_user and totp_code and CONFIG['ADMIN_TOTP_SECRET']:
+            pending_valid = (
+                hmac.compare_digest(str(pending_user), CONFIG['ADMIN_USER'])
+                and now - float(pending_at) <= 300
+            )
+            totp = pyotp.TOTP(CONFIG['ADMIN_TOTP_SECRET'])
+            if not pending_valid or not totp.verify(totp_code, valid_window=1):
+                return render_template(
+                    'login.html', error='Invalid TOTP code', show_totp=True
+                )
+            next_url = safe_local_redirect(session.get('pending_next'))
         else:
-            return render_template('login.html', error="Invalid credentials", show_totp=False)
+            valid_credentials = (
+                username is not None
+                and password is not None
+                and hmac.compare_digest(username, CONFIG['ADMIN_USER'])
+                and hmac.compare_digest(password, CONFIG['ADMIN_PASSWORD'])
+            )
+            if not valid_credentials:
+                return render_template(
+                    'login.html', error='Invalid credentials', show_totp=False
+                )
+            next_url = safe_local_redirect(request.args.get('next'))
+            if CONFIG['ADMIN_TOTP_SECRET']:
+                session['pending_totp_user'] = CONFIG['ADMIN_USER']
+                session['pending_totp_at'] = now
+                session['pending_next'] = next_url
+                return render_template('login.html', show_totp=True)
+
+        session.clear()
+        session['user'] = CONFIG['ADMIN_USER']
+        session['session_version'] = AUTH_SESSION_VERSION
+        session.permanent = True
+        csrf_token()
+        LOGIN_ATTEMPTS.pop(ip, None)
+        return redirect(next_url or url_for('index'))
     
     return render_template('login.html', show_totp=False)
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
+@login_required
+@csrf_protected
 def logout():
-    session.pop('logged_in', None)
+    session.clear()
     return redirect(url_for('login'))
 
 @app.route('/')
 def home_page():
     session_db = Session()
-    is_logged_in = 'logged_in' in session
+    is_logged_in = is_authenticated()
     try:
         query = session_db.query(CustomWidget)
         if not is_logged_in:
@@ -1083,7 +1221,6 @@ def settings():
     if safe_config['IMAP_PASS']: safe_config['IMAP_PASS'] = '********'  # nosec
     if safe_config['ADMIN_PASSWORD']: safe_config['ADMIN_PASSWORD'] = '********'  # nosec
     if safe_config['ADMIN_TOTP_SECRET']: safe_config['ADMIN_TOTP_SECRET'] = '********'  # nosec
-    if safe_config['CW_PRIVATE_KEY']: safe_config['CW_PRIVATE_KEY'] = '********'  # nosec
     if safe_config['DISCORD_WEBHOOK_URL']: safe_config['DISCORD_WEBHOOK_URL'] = '********'  # nosec
     
     # Mask Database URL password
@@ -1191,7 +1328,8 @@ def api_diagnostics_run():
                 mxs = dns.resolver.resolve(domain, 'MX')
                 for mx in mxs:
                     results['dns']['details'].append(f"MX Record: {mx.exchange} (Priority: {mx.preference})")
-            except: results['dns']['details'].append("MX Records: Not found")
+            except dns.exception.DNSException:
+                results['dns']['details'].append("MX Records: Not found")
 
             # SPF
             try:
@@ -1202,14 +1340,16 @@ def api_diagnostics_run():
                         results['dns']['details'].append(f"SPF Record: {str(txt)}")
                         spf_found = True
                 if not spf_found: results['dns']['details'].append("SPF Record: Missing")
-            except: results['dns']['details'].append("SPF Record: Lookup failed")
+            except dns.exception.DNSException:
+                results['dns']['details'].append("SPF Record: Lookup failed")
 
             # DMARC
             try:
                 dmarc = dns.resolver.resolve(f'_dmarc.{domain}', 'TXT')
                 for d in dmarc:
                     results['dns']['details'].append(f"DMARC Record: {str(d)}")
-            except: results['dns']['details'].append("DMARC Record: Missing or failed")
+            except dns.exception.DNSException:
+                results['dns']['details'].append("DMARC Record: Missing or failed")
             
             # PTR (Reverse DNS) of SMTP Host
             try:
@@ -1218,8 +1358,10 @@ def api_diagnostics_run():
                 try:
                     ptr = socket.gethostbyaddr(ip)
                     results['dns']['details'].append(f"Reverse DNS (PTR): {ptr[0]}")
-                except Exception: results['dns']['details'].append("Reverse DNS (PTR): Not found")
-            except Exception: pass  # nosec
+                except socket.herror:
+                    results['dns']['details'].append("Reverse DNS (PTR): Not found")
+            except socket.gaierror as error:
+                logger.debug("SMTP hostname lookup failed: %s", error)
 
             results['dns']['status'] = 'success'
         else:
@@ -1232,6 +1374,7 @@ def api_diagnostics_run():
     return jsonify(results)
 
 @app.route('/smtp-test')
+@login_required
 def smtp_test_page():
     return render_template('smtp_test.html', host=CONFIG['SMTP_HOST'])
 
@@ -1247,9 +1390,7 @@ def decode_spam_page():
 def api_decode_spam():
     # Rate Limiting: 5 per minute per IP
     now = time.time()
-    ip_addr = request.remote_addr
-    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
-        ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    ip_addr = request.remote_addr or 'unknown'
 
     if ip_addr not in DECODE_SPAM_ATTEMPTS:
         DECODE_SPAM_ATTEMPTS[ip_addr] = []
@@ -1274,6 +1415,7 @@ def api_decode_spam():
     # Record usage
     record_usage('decode-spam')
 
+    tmp_path = None
     try:
         legacy = request.json.get('legacy', False)
 
@@ -1298,10 +1440,6 @@ def api_decode_spam():
             cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', '-r', tmp_path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
         
-        # 3. Clean up temp file
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
         if result.returncode != 0:
             # Try to see if it's because of missing dependencies or actual script error
             error_msg = result.stderr if result.stderr else "Script execution failed"
@@ -1331,6 +1469,9 @@ def api_decode_spam():
         return jsonify({'error': 'Decoding timed out (30s)'}), 504
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 @app.route('/whois')
 def whois_page():
@@ -1348,9 +1489,7 @@ def web_check_page():
 def api_blacklist_check():
     # Rate Limiting: 5 per minute per IP
     now = time.time()
-    ip_addr = request.remote_addr
-    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
-        ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    ip_addr = request.remote_addr or 'unknown'
 
     if ip_addr not in BLACKLIST_ATTEMPTS:
         BLACKLIST_ATTEMPTS[ip_addr] = []
@@ -1392,12 +1531,14 @@ def api_blacklist_check():
                     try:
                         mx_ip = socket.gethostbyname(mx_host)
                         if mx_ip not in mx_ips: mx_ips.append(mx_ip)
-                    except Exception: pass  # nosec
-            except Exception: pass  # nosec
+                    except socket.gaierror as error:
+                        logger.debug("MX hostname lookup failed: %s", error)
+            except dns.exception.DNSException as error:
+                logger.debug("MX lookup failed: %s", error)
 
             # Attempt 1: Default Resolver for main IP
             ip = socket.gethostbyname(target)
-        except:
+        except socket.gaierror:
             try:
                 # Attempt 2: Google DNS Fallback
                 resolver = dns.resolver.Resolver()
@@ -1443,7 +1584,7 @@ def api_blacklist_check():
                 ip_results.append({'dnsbl': bl, 'status': 'listed', 'details': str(answers[0])})
             except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
                 ip_results.append({'dnsbl': bl, 'status': 'clean', 'details': 'Not listed'})
-            except:
+            except dns.exception.DNSException:
                 ip_results.append({'dnsbl': bl, 'status': 'error', 'details': 'Timeout/Error'})
         return ip_results
 
@@ -1469,15 +1610,13 @@ def api_blacklist_check():
         'remaining_quota': remaining
     })
 
-@app.route('/api/diagnostics/smtp-test')
+@app.route('/api/diagnostics/smtp-test', methods=['POST'])
+@login_required
+@csrf_protected
 def api_smtp_test():
     # Rate Limiting: 5 per minute per IP
     now = time.time()
-    ip = request.remote_addr
-    
-    # Handle reverse proxy IP if enabled
-    if CONFIG['ENABLE_PROXY'] and request.headers.get('X-Forwarded-For'):
-        ip = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    ip = request.remote_addr or 'unknown'
 
     if ip not in IP_RATE_LIMITS:
         IP_RATE_LIMITS[ip] = []
@@ -1498,8 +1637,12 @@ def api_smtp_test():
     
     record_usage('smtp-diag')
     
-    host = request.args.get('host', CONFIG['SMTP_HOST'])
-    port = request.args.get('port', type=int)
+    data = request.get_json(silent=True) or {}
+    host = str(data.get('host') or CONFIG['SMTP_HOST'] or '').strip()
+    try:
+        port = int(data.get('port') or CONFIG['SMTP_PORT'])
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid SMTP port'}), 400
     
     if not host:
         return jsonify({'error': 'No host configured or provided'}), 400
@@ -1517,14 +1660,21 @@ def api_smtp_test():
         transcript.append(entry)
 
     start_time = time.time()
+    sock = None
     try:
+        resolved_ip, test_port = resolve_smtp_destination(
+            host,
+            port,
+            allowed_hosts=CONFIG['SMTP_DIAGNOSTIC_ALLOWED_HOSTS'],
+            allowed_ports=CONFIG['SMTP_DIAGNOSTIC_ALLOWED_PORTS'],
+        )
         # 1. DNS Lookups
-        ip = socket.gethostbyname(host)
+        target_ip = resolved_ip
         ptr = "Unknown"
         
         # Robust PTR lookup using dnspython
         try:
-            rev_name = dns.reversename.from_address(ip)
+            rev_name = dns.reversename.from_address(target_ip)
             try:
                 # Attempt 1: Default Resolver
                 ptr_results = dns.resolver.resolve(rev_name, "PTR")
@@ -1536,41 +1686,41 @@ def api_smtp_test():
 
             if ptr_results:
                 ptr = str(ptr_results[0]).rstrip('.')
-                add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {ip} resolves to {ptr}")
+                add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {target_ip} resolves to {ptr}")
                 add_row("OK", "SMTP Valid Hostname", "OK - Reverse DNS is a valid Hostname")
             else:
-                raise Exception("No PTR records found")
+                raise LookupError("No PTR records found")
         except Exception as e:
             # Fallback to socket if dnspython fails completely
             try:
-                ptr_res = socket.gethostbyaddr(ip)
+                ptr_res = socket.gethostbyaddr(target_ip)
                 ptr = ptr_res[0]
-                add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {ip} resolves to {ptr}")
+                add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {target_ip} resolves to {ptr}")
                 add_row("OK", "SMTP Valid Hostname", "OK - Reverse DNS is a valid Hostname")
-            except:
-                add_row("Warning", "SMTP Reverse DNS Mismatch", f"Warning - Could not resolve PTR for {ip} ({str(e)})")
+            except socket.herror:
+                add_row("Warning", "SMTP Reverse DNS Mismatch", f"Warning - Could not resolve PTR for {target_ip} ({str(e)})")
                 add_row("Warning", "SMTP Valid Hostname", "Reverse DNS lookup failed")
 
         # 2. Connection & Banner
         conn_start = time.time()
-        # Use provided port, or logic-based default
-        test_port = port if port else (CONFIG['SMTP_PORT'] if host == CONFIG['SMTP_HOST'] else 25)
-        
         # Handle SSL vs plain
         if test_port == 465:
             context = ssl.create_default_context()
-            sock = context.wrap_socket(socket.create_connection((host, test_port), timeout=20), server_hostname=host)
+            sock = context.wrap_socket(
+                socket.create_connection((resolved_ip, test_port), timeout=20),
+                server_hostname=host,
+            )
         else:
-            sock = socket.create_connection((host, test_port), timeout=20)
+            sock = socket.create_connection((resolved_ip, test_port), timeout=20)
+        sock.settimeout(10)
             
         conn_time = time.time() - conn_start
         
-        log(f"Connecting to {ip} on port {test_port}")        
+        log(f"Connecting to {resolved_ip} on port {test_port}")
         # Read Banner
         banner_raw = sock.recv(1024).decode(errors='ignore').strip()
         log(banner_raw, conn_time)
         
-        banner_text = banner_raw.split(' ', 1)[1] if ' ' in banner_raw else banner_raw
         banner_match = ptr.lower() in banner_raw.lower()
         if banner_match:
             add_row("OK", "SMTP Banner Check", "OK - Reverse DNS matches SMTP Banner")
@@ -1588,7 +1738,7 @@ def api_smtp_test():
         log(ehlo_resp, ehlo_time)
 
         # 4. TLS Check
-        has_tls = "STARTTLS" in ehlo_resp or CONFIG['SMTP_PORT'] == 465
+        has_tls = "STARTTLS" in ehlo_resp or test_port == 465
         add_row("OK" if has_tls else "Warning", "SMTP TLS", "OK - Supports TLS." if has_tls else "TLS not detected in EHLO")
 
         # 5. Open Relay Test (Attempting to mail to external without auth)
@@ -1613,11 +1763,14 @@ def api_smtp_test():
         add_row("OK", "SMTP Transaction Time", f"{trans_time:.3f} seconds - Good on Transaction Time")
         
         sock.send(b"QUIT\r\n")
-        sock.close()
-        
+    except SMTPDestinationError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         log(f"Error: {str(e)}")
         add_row("Danger", "Connection", f"Failed: {str(e)}")
+    finally:
+        if sock is not None:
+            sock.close()
 
     return jsonify({
         'report': report,
@@ -1682,6 +1835,7 @@ def api_mail_tester_start(test_id):
 
 @app.route('/api/recipients', methods=['GET', 'POST'])
 @login_required
+@csrf_protected
 def api_recipients():
     session = Session()
     try:
@@ -1727,6 +1881,7 @@ def api_recipients():
 
 @app.route('/api/recipients/<int:r_id>', methods=['DELETE'])
 @login_required
+@csrf_protected
 def delete_recipient(r_id):
     session = Session()
     try:
@@ -1743,6 +1898,7 @@ def delete_recipient(r_id):
 
 @app.route('/api/recipients/<int:r_id>', methods=['PUT'])
 @login_required
+@csrf_protected
 def update_recipient(r_id):
     session = Session()
     try:
@@ -1752,11 +1908,10 @@ def update_recipient(r_id):
         
         data = request.json
         if 'send_interval' in data:
-            old_interval = r.send_interval
             r.send_interval = int(data['send_interval'])
             # If the interval was shortened, adjust next_send_at so it happens sooner
             # We set it to now + new_interval, or just now if it was long ago
-            now = datetime.datetime.utcnow()
+            now = utc_now()
             r.next_send_at = now + datetime.timedelta(seconds=r.send_interval)
             logger.info(f"Updated interval for {r.email} to {r.send_interval}s. Next send at: {r.next_send_at}")
         if 'alert_threshold' in data:
@@ -1779,6 +1934,7 @@ def update_recipient(r_id):
 
 @app.route('/api/widgets', methods=['GET', 'POST'])
 @login_required
+@csrf_protected
 def api_widgets():
     session_db = Session()
     try:
@@ -1831,6 +1987,7 @@ def serve_custom_icon(filename):
 
 @app.route('/api/widgets/reorder', methods=['POST'])
 @login_required
+@csrf_protected
 def api_widgets_reorder():
     session_db = Session()
     try:
@@ -1848,6 +2005,7 @@ def api_widgets_reorder():
 
 @app.route('/api/widgets/<int:w_id>', methods=['POST', 'PUT', 'DELETE'])
 @login_required
+@csrf_protected
 def api_widget_detail(w_id):
     session_db = Session()
     try:
@@ -1916,13 +2074,13 @@ def mask_email(email):
             m_domain += '.' + domain_parts[-1]
             
         return f"{m_user}@{m_domain}"
-    except:
+    except (IndexError, ValueError):
         return email
 
 @app.route('/api/stats/overview')
 def api_stats_overview():
-    now = datetime.datetime.utcnow()
-    is_logged_in = 'logged_in' in session
+    now = utc_now()
+    is_logged_in = is_authenticated()
     
     # Return cached data if it's less than 120 seconds old (only for public users)
     if not is_logged_in and STATS_CACHE['data'] and STATS_CACHE['timestamp']:
@@ -2001,7 +2159,7 @@ def api_stats_overview():
 def api_stats():
     """Returns the latest probe for each ACTIVE recipient."""
     session_db = Session()
-    is_logged_in = 'logged_in' in session
+    is_logged_in = is_authenticated()
     try:
         # 1. Get list of all currently existing recipient emails
         active_recipient_emails = [r.email for r in session_db.query(Recipient).all()]
@@ -2047,7 +2205,7 @@ def api_stats():
 def api_history():
     """Returns history, optionally filtered by recipient."""
     session_db = Session()
-    is_logged_in = 'logged_in' in session
+    is_logged_in = is_authenticated()
     try:
         limit = request.args.get('limit', 100, type=int)
         recipient = request.args.get('recipient')
@@ -2083,11 +2241,11 @@ def cleanup_old_probes():
     session_db = Session()
     try:
         # 1. Clean Probes (7 days)
-        cutoff_probes = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+        cutoff_probes = utc_now() - datetime.timedelta(days=7)
         deleted_probes = session_db.query(EmailProbe).filter(EmailProbe.sent_at < cutoff_probes).delete()
         
         # 2. Clean Metric Events (30 days) - keep longer for Day stats
-        cutoff_metrics = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+        cutoff_metrics = utc_now() - datetime.timedelta(days=30)
         deleted_metrics = session_db.query(MetricEvent).filter(MetricEvent.timestamp < cutoff_metrics).delete()
 
         session_db.commit()
