@@ -2,7 +2,6 @@
 
 [![Python CI](https://github.com/arumes31/mail-delivery-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/ci.yml)
 [![Container](https://github.com/arumes31/mail-delivery-tester/actions/workflows/container.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/container.yml)
-[![CodeQL](https://github.com/arumes31/mail-delivery-tester/actions/workflows/codeql.yml/badge.svg)](https://github.com/arumes31/mail-delivery-tester/actions/workflows/codeql.yml)
 
 MailDT is a self-hosted SMTP/IMAP delivery monitor. It sends unique probes, watches for their return, measures delivery latency, checks SPF/DKIM/DMARC signals, and exposes authenticated operational diagnostics.
 
