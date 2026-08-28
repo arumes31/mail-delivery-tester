@@ -33,6 +33,11 @@ KNOWN_SECRET_DEFAULTS = {
     "password",
     "securepassword",
 }
+LOGIN_ENDPOINTS = {
+    "/": "homepage",
+    "/dashboard": "index",
+    "/settings": "settings",
+}
 
 
 def read_secret(name: str, *, minimum_length: int) -> str:
@@ -98,6 +103,14 @@ def safe_local_redirect(candidate: str | None) -> str | None:
     if parsed.scheme or parsed.netloc or not parsed.path.startswith("/"):
         return None
     return candidate
+
+
+def safe_login_endpoint(candidate: str | None) -> str | None:
+    """Map an exact local login destination to a server-owned endpoint."""
+    target = safe_local_redirect(candidate)
+    if target is None:
+        return None
+    return LOGIN_ENDPOINTS.get(target)
 
 
 def parse_cidrs(value: str | None) -> tuple[ipaddress._BaseNetwork, ...]:

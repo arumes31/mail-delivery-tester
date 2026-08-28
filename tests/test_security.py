@@ -12,6 +12,7 @@ from security import (
     read_secret,
     resolve_smtp_destination,
     safe_local_redirect,
+    safe_login_endpoint,
     session_version,
 )
 
@@ -76,6 +77,19 @@ def test_redirect_policy_rejects_external_or_ambiguous_targets(candidate):
 
 def test_redirect_policy_allows_local_path_query_and_fragment():
     assert safe_local_redirect("/dashboard?view=1#status") == "/dashboard?view=1#status"
+
+
+@pytest.mark.parametrize(
+    ("candidate", "endpoint"),
+    [("/", "homepage"), ("/dashboard", "index"), ("/settings", "settings")],
+)
+def test_safe_login_endpoint_maps_only_server_owned_destinations(candidate, endpoint):
+    assert safe_login_endpoint(candidate) == endpoint
+
+
+@pytest.mark.parametrize("candidate", ["/unknown", "/settings?admin=1", "https://evil.test"])
+def test_safe_login_endpoint_rejects_unlisted_destinations(candidate):
+    assert safe_login_endpoint(candidate) is None
 
 
 def public_resolver(host, port, *, type):

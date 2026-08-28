@@ -47,7 +47,7 @@ from security import (
     read_optional_secret,
     read_secret,
     resolve_smtp_destination,
-    safe_local_redirect,
+    safe_login_endpoint,
     session_version,
 )
 from spam_decoder import decode_spam_headers
@@ -366,7 +366,7 @@ def run_migrations():
             Base.metadata.create_all(engine)
 
     except Exception as e:
-        logger.error(f"Migration failed: {e}")
+        logger.error("Migration failed (%s)", type(e).__name__)
         session.rollback()
     finally:
         session.close()
@@ -380,7 +380,7 @@ def reset_alert_states():
         if updated > 0:
             logger.info(f"Startup: Reset alert state for {updated} recipients.")
     except Exception as e:
-        logger.error(f"Failed to reset alert states: {e}")
+        logger.error("Failed to reset alert states (%s)", type(e).__name__)
         session_db.rollback()
     finally:
         session_db.close()
@@ -403,7 +403,7 @@ def record_usage(tool_name):
         
         session_db.commit()
     except Exception as e:
-        logger.error(f"Failed to record usage for {tool_name}: {e}")
+        logger.error("Failed to record usage for %s (%s)", tool_name, type(e).__name__)
         session_db.rollback()
     finally:
         session_db.close()
@@ -429,7 +429,7 @@ def increment_counter(name, session_provided=None):
         if not session_provided:
             session_db.commit()
     except Exception as e:
-        logger.error(f"Failed to increment counter {name}: {e}")
+        logger.error("Failed to increment counter %s (%s)", name, type(e).__name__)
         if not session_provided:
             session_db.rollback()
     finally:
@@ -555,8 +555,12 @@ def send_probe_email():
                     increment_counter('mail_sent', session_provided=session)
                     logger.info(f"Sent probe {probe_guid} to {recipient.email}")
                 except Exception as send_err:
-                    err_msg = f"❌ **Mail Send Failure**\nFailed to send probe to `{recipient.email}`.\nError: `{str(send_err)}`"
-                    logger.error(f"[DEBUG] SMTP Error for {recipient.email}: {str(send_err)}")
+                    err_msg = f"❌ **Mail Send Failure**\nFailed to send probe to `{recipient.email}`."
+                    logger.error(
+                        "SMTP send failed for %s (%s)",
+                        recipient.email,
+                        type(send_err).__name__,
+                    )
                     increment_counter('send_failure', session_provided=session)
                     
                     # Record failure in DB
@@ -576,7 +580,7 @@ def send_probe_email():
                         if recipient.email_alerts_enabled:
                             send_email_alert(err_msg)
                         if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
-                            send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Alert", err_msg, recipient.email, status="Open", event_type="SendFailure", probe_guid=probe_guid, metadata={"error": str(send_err)})
+                            send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Alert", err_msg, recipient.email, status="Open", event_type="SendFailure", probe_guid=probe_guid, metadata={"error_type": type(send_err).__name__})
                         recipient.alert_active = True
                     
                     # Still update next send time
@@ -585,7 +589,7 @@ def send_probe_email():
         session.commit()
 
     except Exception as e:
-        logger.error(f"Error in send loop: {e}")
+        logger.error("Send loop failed (%s)", type(e).__name__)
         session.rollback()
     finally:
         session.close()
@@ -815,7 +819,7 @@ def check_inbox():
         mail.logout()
 
     except Exception as e:
-        logger.error(f"Error checking inbox: {e}")
+        logger.error("Inbox check failed (%s)", type(e).__name__)
     finally:
         session.close()
 
@@ -825,7 +829,7 @@ def send_discord_alert(message):
     try:
         requests.post(CONFIG['DISCORD_WEBHOOK_URL'], json={"content": message}, timeout=20)
     except Exception as e:
-        logger.error(f"Failed to send discord alert: {e}")
+        logger.error("Discord alert failed (%s)", type(e).__name__)
 
 def send_email_alert(message):
     """Sends a formatted HTML alert email."""
@@ -891,16 +895,12 @@ def send_email_alert(message):
         logger.info(f"[DEBUG] Email alert sent to {CONFIG['ALERT_MAIL_RECIPIENT']}")
 
     except Exception as e:
-        logger.error(f"[DEBUG] Failed to send email alert: {e}")
+        logger.error("Email alert failed (%s)", type(e).__name__)
 
 def send_webhook_alert(webhook_url, subject, description, recipient_email=None, status="Open", event_type="Unknown", probe_guid=None, metadata=None):
     """Sends a JSON webhook alert."""
     if not webhook_url:
         return
-
-    from urllib.parse import urlparse
-    parsed = urlparse(webhook_url)
-    masked_url = f"{parsed.scheme}://{parsed.netloc}/..." if parsed.netloc else "hidden-url"
 
     tenant = ""
     if recipient_email and '@' in recipient_email:
@@ -926,9 +926,9 @@ def send_webhook_alert(webhook_url, subject, description, recipient_email=None, 
             timeout=CONFIG['WEBHOOK_TIMEOUT']
         )
         response.raise_for_status()
-        logger.info(f"Webhook alert sent successfully to {masked_url}")
+        logger.info("Webhook alert sent successfully")
     except Exception as e:
-        logger.error(f"Failed to send webhook alert to {masked_url}: {e}")
+        logger.error("Webhook alert failed (%s)", type(e).__name__)
 
 def check_delays():
     """Checks for emails sent > their specific alert_threshold ago that haven't arrived."""
@@ -989,7 +989,7 @@ def check_delays():
         session.commit()
 
     except Exception as e:
-        logger.error(f"Error checking delays: {e}")
+        logger.error("Delay check failed (%s)", type(e).__name__)
     finally:
         session.close()
 
@@ -1021,7 +1021,7 @@ def initialize_app():
             _app_initialized = True
             logger.info("Application initialization complete.")
         except Exception as e:
-            logger.error(f"CRITICAL: Application failed to initialize: {e}")
+            logger.error("CRITICAL: application initialization failed (%s)", type(e).__name__)
             # In a real app we might want to exit, but here we'll let it retry next request
             # or show errors.
 
@@ -1103,7 +1103,7 @@ def login_required(f):
         if request.is_json or request.path.startswith('/api/'):
              return jsonify({"error": "Unauthorized"}), 401
              
-        return redirect(url_for('login', next=request.full_path))
+        return redirect(url_for('login', next=request.path))
     return decorated_function
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1147,7 +1147,7 @@ def login():
                 return render_template(
                     'login.html', error='Invalid TOTP code', show_totp=True
                 )
-            next_url = safe_local_redirect(session.get('pending_next'))
+            next_endpoint = session.get('pending_next_endpoint')
         else:
             valid_credentials = (
                 username is not None
@@ -1159,11 +1159,11 @@ def login():
                 return render_template(
                     'login.html', error='Invalid credentials', show_totp=False
                 )
-            next_url = safe_local_redirect(request.args.get('next'))
+            next_endpoint = safe_login_endpoint(request.args.get('next'))
             if CONFIG['ADMIN_TOTP_SECRET']:
                 session['pending_totp_user'] = CONFIG['ADMIN_USER']
                 session['pending_totp_at'] = now
-                session['pending_next'] = next_url
+                session['pending_next_endpoint'] = next_endpoint
                 return render_template('login.html', show_totp=True)
 
         session.clear()
@@ -1172,7 +1172,13 @@ def login():
         session.permanent = True
         csrf_token()
         LOGIN_ATTEMPTS.pop(ip, None)
-        return redirect(next_url or url_for('index'))
+        if next_endpoint == 'settings':
+            destination = url_for('settings')
+        elif next_endpoint == 'homepage':
+            destination = url_for('homepage')
+        else:
+            destination = url_for('index')
+        return redirect(destination)
     
     return render_template('login.html', show_totp=False)
 
@@ -1238,7 +1244,8 @@ def api_scheduler_health():
         response = requests.get("http://scheduler:5001/health", timeout=2)
         return jsonify(response.json())
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 503
+        logger.warning("Scheduler health check failed (%s)", type(e).__name__)
+        return jsonify({"status": "error", "message": "scheduler unavailable"}), 503
 
 @app.route('/recipients')
 @login_required
@@ -1283,14 +1290,16 @@ def api_diagnostics_run():
                     results['smtp']['details'].append("Authentication: Success")
                     results['smtp']['status'] = 'success'
                 except Exception as e:
-                    results['smtp']['details'].append(f"Authentication Failed: {str(e)}")
+                    logger.warning("SMTP authentication check failed (%s)", type(e).__name__)
+                    results['smtp']['details'].append("Authentication failed")
                     results['smtp']['status'] = 'warning'
         else:
             results['smtp']['status'] = 'skipped'
             results['smtp']['details'].append("SMTP Host not configured")
     except Exception as e:
+        logger.warning("SMTP connection check failed (%s)", type(e).__name__)
         results['smtp']['status'] = 'danger'
-        results['smtp']['details'].append(f"Connection Error: {str(e)}")
+        results['smtp']['details'].append("Connection failed")
 
     # 2. IMAP Check
     try:
@@ -1304,14 +1313,16 @@ def api_diagnostics_run():
                     results['imap']['details'].append("Authentication: Success")
                     results['imap']['status'] = 'success'
                 except Exception as e:
-                    results['imap']['details'].append(f"Authentication Failed: {str(e)}")
+                    logger.warning("IMAP authentication check failed (%s)", type(e).__name__)
+                    results['imap']['details'].append("Authentication failed")
                     results['imap']['status'] = 'warning'
         else:
             results['imap']['status'] = 'skipped'
             results['imap']['details'].append("IMAP Host not configured")
     except Exception as e:
+        logger.warning("IMAP connection check failed (%s)", type(e).__name__)
         results['imap']['status'] = 'danger'
-        results['imap']['details'].append(f"Connection Error: {str(e)}")
+        results['imap']['details'].append("Connection failed")
 
     # 3. DNS Check (for the SMTP/IMAP domain)
     try:
@@ -1368,8 +1379,9 @@ def api_diagnostics_run():
             results['dns']['status'] = 'skipped'
             results['dns']['details'].append("Could not determine domain from SMTP_USER")
     except Exception as e:
+        logger.warning("DNS analysis failed (%s)", type(e).__name__)
         results['dns']['status'] = 'danger'
-        results['dns']['details'].append(f"DNS Analysis Error: {str(e)}")
+        results['dns']['details'].append("DNS analysis failed")
 
     return jsonify(results)
 
@@ -1463,12 +1475,13 @@ def api_decode_spam():
                 })
             return jsonify({'report': report, 'remaining_quota': remaining})
         except json.JSONDecodeError:
-            return jsonify({'error': 'Failed to parse decoder output as JSON', 'raw': result.stdout}), 500
+            return jsonify({'error': 'Failed to parse decoder output as JSON'}), 500
 
     except subprocess.TimeoutExpired:
         return jsonify({'error': 'Decoding timed out (30s)'}), 504
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error("Decoder failed (%s)", type(e).__name__)
+        return jsonify({'error': 'Decoder failed'}), 500
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -1547,8 +1560,8 @@ def api_blacklist_check():
                 if answers:
                     ip = str(answers[0])
                 else: raise Exception("No A record")
-            except Exception as e:
-                return jsonify({'error': f'Could not resolve hostname: {target} ({str(e)})'}), 400
+            except Exception:
+                return jsonify({'error': 'Could not resolve hostname'}), 400
 
     dnsbls = [
         "zen.spamhaus.org",
@@ -1690,7 +1703,7 @@ def api_smtp_test():
                 add_row("OK", "SMTP Valid Hostname", "OK - Reverse DNS is a valid Hostname")
             else:
                 raise LookupError("No PTR records found")
-        except Exception as e:
+        except Exception:
             # Fallback to socket if dnspython fails completely
             try:
                 ptr_res = socket.gethostbyaddr(target_ip)
@@ -1698,7 +1711,7 @@ def api_smtp_test():
                 add_row("OK", "SMTP Reverse DNS Mismatch", f"OK - {target_ip} resolves to {ptr}")
                 add_row("OK", "SMTP Valid Hostname", "OK - Reverse DNS is a valid Hostname")
             except socket.herror:
-                add_row("Warning", "SMTP Reverse DNS Mismatch", f"Warning - Could not resolve PTR for {target_ip} ({str(e)})")
+                add_row("Warning", "SMTP Reverse DNS Mismatch", f"Warning - Could not resolve PTR for {target_ip}")
                 add_row("Warning", "SMTP Valid Hostname", "Reverse DNS lookup failed")
 
         # 2. Connection & Banner
@@ -1706,6 +1719,7 @@ def api_smtp_test():
         # Handle SSL vs plain
         if test_port == 465:
             context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             sock = context.wrap_socket(
                 socket.create_connection((resolved_ip, test_port), timeout=20),
                 server_hostname=host,
@@ -1766,8 +1780,9 @@ def api_smtp_test():
     except SMTPDestinationError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        log(f"Error: {str(e)}")
-        add_row("Danger", "Connection", f"Failed: {str(e)}")
+        logger.warning("SMTP diagnostic failed (%s)", type(e).__name__)
+        log("Error: connection or protocol check failed")
+        add_row("Danger", "Connection", "Connection or protocol check failed")
     finally:
         if sock is not None:
             sock.close()
@@ -1822,7 +1837,7 @@ def api_mail_tester_start(test_id):
             session_db.add(new_signal)
             session_db.commit()
     except Exception as e:
-        logger.error(f"Failed to start active test signal: {e}")
+        logger.error("Failed to start active test signal (%s)", type(e).__name__)
         session_db.rollback()
     finally:
         session_db.close()
@@ -1875,7 +1890,8 @@ def api_recipients():
             return jsonify({'message': 'Added', 'id': new_r.id})
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error("Recipient creation failed (%s)", type(e).__name__)
+        return jsonify({'error': 'Recipient creation failed'}), 500
     finally:
         session.close()
 
@@ -1928,7 +1944,8 @@ def update_recipient(r_id):
         session.commit()
         return jsonify({'message': 'Updated'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error("Recipient update failed (%s)", type(e).__name__)
+        return jsonify({'error': 'Recipient update failed'}), 500
     finally:
         session.close()
 
@@ -1999,7 +2016,8 @@ def api_widgets_reorder():
         session_db.commit()
         return jsonify({'message': 'Order updated'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error("Widget reorder failed (%s)", type(e).__name__)
+        return jsonify({'error': 'Widget reorder failed'}), 500
     finally:
         session_db.close()
 
@@ -2022,7 +2040,7 @@ def api_widget_detail(w_id):
                     if os.path.exists(file_path):
                         os.remove(file_path)
                 except Exception as e:
-                    logger.error(f"Failed to delete icon file: {e}")
+                    logger.error("Failed to delete icon file (%s)", type(e).__name__)
 
             session_db.delete(widget)
             session_db.commit()
@@ -2252,7 +2270,7 @@ def cleanup_old_probes():
         if deleted_probes > 0 or deleted_metrics > 0:
             logger.info(f"Cleanup: Deleted {deleted_probes} probes and {deleted_metrics} metric events.")
     except Exception as e:
-        logger.error(f"Error in cleanup: {e}")
+        logger.error("Cleanup failed (%s)", type(e).__name__)
         session_db.rollback()
     finally:
         session_db.close()
