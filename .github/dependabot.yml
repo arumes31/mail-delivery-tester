@@ -6,6 +6,11 @@ updates:
     target-branch: "main"
     schedule:
       interval: "weekly"
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action"
+          - "github/codeql-action/*"
 
   # Maintain dependencies for pip (requirements.txt)
   - package-ecosystem: "pip"

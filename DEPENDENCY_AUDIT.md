@@ -195,3 +195,21 @@ through the normal separately authorized process. Merely changing this file
 does not patch existing environments. Inspect deployed idna/Werkzeug versions
 and replace old environments/images where necessary. No new vulnerability
 ignore or weakened CI gate is part of this change.
+
+## CI follow-up after authorized publication
+
+The dependency remediation was committed as `f9a74b0` and pushed to main at the
+maintainer's request. Python checks, dependency submission, and Docker build,
+publication, Trivy scan and SARIF upload passed. The custom JavaScript CodeQL
+analysis completed but its SARIF upload failed because repository default setup
+was also enabled for Python and Actions. GitHub documents that these setup modes
+[cannot upload CodeQL results concurrently](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/troubleshoot-sarif-uploads/default-setup-enabled).
+
+The repository workflow now retains JavaScript and adds Python and Actions,
+preserving all three analyses in advanced setup. Switching repository default
+setup off is required for these uploads. All CodeQL subactions, including both
+Trivy upload steps, use the same official, verified v4.38.2 release commit
+`2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2`, and Dependabot groups their future
+updates. The earlier local image scan timeouts remain historical coverage gaps;
+the successful CI Trivy run has the workflow's existing HIGH/CRITICAL,
+fixed-vulnerability-only scope.
