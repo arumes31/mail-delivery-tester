@@ -11,7 +11,7 @@ tldextract==5.3.1
 packaging==26.0
 colorama==0.4.6
 gunicorn==25.1.0
-urllib3>=2.6.3
+urllib3>=2.8.0
 Werkzeug>=3.1.6
 # Security floor for the transitive dependency of requests and tldextract.
 idna>=3.15
