@@ -1,7 +1,7 @@
-import sys
-import os
 import io
 import json
+import os
+import sys
 
 # Import the official script as a module
 try:

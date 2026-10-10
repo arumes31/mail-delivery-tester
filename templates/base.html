@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>MailDT - Delivery Monitor</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/logo.svg') }}">
     <!-- Bootstrap Dark -->
@@ -206,11 +207,18 @@
                     <li class="nav-item"><a class="nav-link" href="/dashboard"><i class="fa-solid fa-chart-line me-1 text-primary"></i> Live Monitor</a></li>
                     {% endif %}
 
-                    {% if session.logged_in %}
+                    {% if is_authenticated %}
                     {% if request.endpoint != 'home_page' %}
                     <li class="nav-item"><a class="nav-link" href="/recipients"><i class="fa-solid fa-users me-1 text-primary"></i> Recipients</a></li>
                     {% endif %}
-                    <li class="nav-item"><a class="nav-link text-warning" href="/logout"><i class="fa-solid fa-right-from-bracket me-1"></i> Logout</a></li>
+                    <li class="nav-item">
+                        <form method="POST" action="/logout" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="nav-link text-warning border-0 bg-transparent">
+                                <i class="fa-solid fa-right-from-bracket me-1"></i> Logout
+                            </button>
+                        </form>
+                    </li>
                     {% else %}
                     <li class="nav-item"><a class="nav-link" href="/login"><i class="fa-solid fa-right-to-bracket me-1 text-primary"></i> Login</a></li>
                     {% endif %}
@@ -240,6 +248,18 @@
     <!-- SortableJS (Local) -->
     <script src="{{ url_for('static', filename='js/Sortable.min.js') }}"></script>
     <script>
+        // Attach the session CSRF token to every same-origin state-changing fetch.
+        const maildtFetch = window.fetch.bind(window);
+        window.fetch = function(resource, options = {}) {
+            const method = (options.method || (resource instanceof Request ? resource.method : 'GET')).toUpperCase();
+            const target = new URL(resource instanceof Request ? resource.url : resource, window.location.href);
+            if (target.origin === window.location.origin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                options = { ...options, headers: new Headers(options.headers || {}) };
+                options.headers.set('X-CSRF-Token', document.querySelector('meta[name="csrf-token"]').content);
+            }
+            return maildtFetch(resource, options);
+        };
+
         function showToast(message, title='Notification', type='info') {
             const toastEl = document.getElementById('liveToast');
             document.getElementById('toastTitle').innerText = title;

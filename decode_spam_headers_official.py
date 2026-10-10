@@ -129,6 +129,7 @@ import textwrap
 import time
 import atexit
 import base64
+from urllib.parse import quote
 
 from html import escape
 from email import header as emailheader
@@ -171,6 +172,8 @@ except ImportError:
         # pip3 install requests
 ''')
     sys.exit(1)
+
+from http_utils import bounded_https_get
 
 try:
     import tldextract
@@ -895,8 +898,6 @@ class SMTPHeadersAnalysis:
 
         '19625305002' : '(GUESSING) Something to do with the HTML code and used tags/structures',
         '43540500002' : '(GUESSING) Something to do with the HTML code and used tags/structures',
-
-        '460985005' : '(GUESSING) Something to do with either more-complex HTML code or with the <a> tag and its URL.',
 
         # Triggered on an empty text message, subject "test" - that was marked with "Domain Impersonation", however 
         # ForeFront Anti-Spam headers did not support that Domain Impersonation. Weird.
@@ -2663,9 +2664,8 @@ Results will be unsound. Make sure you have pasted your headers with correct spa
         url = url.replace('TENANT_ID', tenantID)
 
         try:
-            r = requests.get(
+            r = bounded_https_get(
                 url, 
-                allow_redirects=True,
                 headers = {
                     'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4600.00 Safari/537.36',
                 })
@@ -2691,7 +2691,8 @@ Results will be unsound. Make sure you have pasted your headers with correct spa
         self.addSecurityAppliance('Office365')
 
         try:
-            r = requests.get(f'https://login.microsoftonline.com/{value}/.well-known/openid-configuration')
+            tenant = quote(value, safe='')
+            r = bounded_https_get(f'https://login.microsoftonline.com/{tenant}/.well-known/openid-configuration')
             out = r.json()
 
             #
@@ -2823,7 +2824,8 @@ Results will be unsound. Make sure you have pasted your headers with correct spa
         self.addSecurityAppliance('Office365')
 
         try:
-            r = requests.get(f'https://login.microsoftonline.com/{value}/.well-known/openid-configuration')
+            tenant = quote(value, safe='')
+            r = bounded_https_get(f'https://login.microsoftonline.com/{tenant}/.well-known/openid-configuration')
             out = r.json()
 
             if 'error' in out.keys() and out['error'] != '':
@@ -6355,8 +6357,8 @@ This can lead to an internal information disclosure. This test shows potential h
         try:
             self.logger.dbg(f'testExtractIP: Collecting IP Geo metadata...')
 
-            r = requests.get(
-                f'http://ip-api.com/json/{addr}',
+            r = bounded_https_get(
+                f'https://ipwho.is/{quote(addr, safe="")}',
                 headers = {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
                     'Accept-Language': 'en-US',

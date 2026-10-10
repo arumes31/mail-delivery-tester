@@ -1,0 +1,6 @@
+* @arumes31
+/.github/ @arumes31
+/Dockerfile @arumes31
+/docker-compose*.yml @arumes31
+/requirements*.txt @arumes31
+/security.py @arumes31

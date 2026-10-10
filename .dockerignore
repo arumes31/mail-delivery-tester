@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.env
+.pytest-tmp
+.pytest_cache
+.ruff_cache
+__pycache__
+bandit-report.html
+bandit_report.json
+coverage.xml
+data
+data-web
+graphify-out
+tests

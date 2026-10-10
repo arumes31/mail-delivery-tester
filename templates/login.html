@@ -11,7 +11,8 @@
 
         <div class="card shadow-lg border-0">
             <div class="card-body p-4">
-                <form method="POST" action="/login">
+                <form method="POST" action="{{ request.full_path }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     {% if not show_totp %}
                     <div class="mb-3">
                         <label for="username" class="form-label small fw-bold text-uppercase opacity-75">Username</label>
@@ -28,8 +29,6 @@
                         </div>
                     </div>
                     {% else %}
-                    <input type="hidden" name="username" value="{{ username }}">
-                    <input type="hidden" name="password" value="{{ password }}">
                     <div class="mb-4">
                         <label for="totp" class="form-label small fw-bold text-uppercase opacity-75">2FA Code (TOTP)</label>
                         <div class="input-group">
