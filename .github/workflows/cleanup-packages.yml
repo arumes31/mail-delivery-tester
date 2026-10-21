@@ -1,36 +1,38 @@
-name: Cleanup Old Packages
-
+name: GHCR cleanup
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry Run (don''t actually delete)'
-        default: true
+        description: Report candidates without deleting images
         type: boolean
-      min_versions_to_keep:
-        description: 'Minimum versions to keep'
-        default: '3'
+        default: true
         required: true
-
 permissions:
   contents: read
-
+concurrency:
+  group: ghcr-retention
+  cancel-in-progress: false
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       packages: write
-    timeout-minutes: 10
     steps:
-      - name: Dry-run summary
-        if: ${{ inputs.dry_run }}
-        run: echo "Dry run; no package versions will be deleted. Set dry_run=false to execute cleanup."
-
-      - name: Delete old package versions
-        if: ${{ !inputs.dry_run }}
-        uses: actions/delete-package-versions@25ad4af5be03aef10e0b3376b248688b7a44c40b # v5.0.0
+      - name: Prune only old unreferenced untagged manifests
+        # v3.1 preserves platform/SBOM/provenance children of retained OCI indexes.
+        # Tagged versions and commit tags remain available for rollback.
+        uses: docker://ghcr.io/snok/container-retention-policy@sha256:884037f146d6ef574b61fbcc59bef490f887322e6b9dc2eefcf364cb4e9b4112
         with:
-          package-name: 'mail-delivery-tester'
-          package-type: 'container'
-          min-versions-to-keep: ${{ inputs.min_versions_to_keep }}
-          ignore-versions: '^(latest|main|bench)$'
+          args: >-
+            --account=user
+            --token=${{ secrets.GITHUB_TOKEN }}
+            --image-names=${{ github.event.repository.name }}
+            --tag-selection=untagged
+            --keep-n-most-recent=30
+            --timestamp-to-use=updated_at
+            --cut-off=30d
+            --dry-run=${{ inputs.dry_run }}
+        env:
+          RUST_LOG: container_retention_policy=INFO
