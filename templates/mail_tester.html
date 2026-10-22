@@ -25,7 +25,7 @@
                     <label class="form-label fw-bold">To Address:</label>
                     <div class="input-group">
                         <input type="text" class="form-control" style="background-color: #120d1d; color: #b0b0b0;" id="testEmail" value="{{ imap_user }}" readonly>
-                        <button class="btn btn-outline-secondary" onclick="copyToClipboard('{{ imap_user }}')">
+                        <button class="btn btn-outline-secondary" id="copyEmailBtn">
                             <i class="fa-solid fa-copy"></i>
                         </button>
                     </div>
@@ -113,21 +113,36 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     let currentTestId = null;
     let pollInterval = null;
     let startTime = null;
 
-    function generateId() {
-        return Math.random().toString(36).substring(2, 10).toUpperCase();
-    }
+    document.getElementById('copyEmailBtn').addEventListener('click', function() {
+        copyToClipboard(document.getElementById('testEmail').value);
+    });
 
     document.getElementById('startTestBtn').addEventListener('click', function() {
-        currentTestId = generateId();
+        document.getElementById('startTestBtn').disabled = true;
+
+        // The test ID is generated server-side and bound to this browser session.
+        fetch('/api/mail-tester/start', { method: 'POST' })
+            .then(res => res.json().then(data => {
+                if (!res.ok || !data.test_id) throw new Error(data.message || data.error || 'Failed to start test');
+                return data;
+            }))
+            .then(data => beginTest(data.test_id))
+            .catch(err => {
+                document.getElementById('startTestBtn').disabled = false;
+                showToast(err.message, 'Error', 'danger');
+            });
+    });
+
+    function beginTest(testId) {
+        currentTestId = testId;
         const fullSubject = "MAILDT-TEST: " + currentTestId;
         document.getElementById('testSubject').value = fullSubject;
         
-        document.getElementById('startTestBtn').disabled = true;
         document.getElementById('statusAlert').classList.remove('d-none', 'alert-danger');
         document.getElementById('statusAlert').classList.add('alert-info');
         document.getElementById('statusAlert').querySelector('.spinner-border').classList.remove('d-none');
@@ -137,16 +152,13 @@
         
         startTime = Date.now();
         updateTimer();
-        
-        // Notify backend to poll faster
-        fetch('/api/mail-tester/start/' + currentTestId, { method: 'POST' });
 
         // Start polling
         if (pollInterval) clearInterval(pollInterval);
         pollInterval = setInterval(checkTest, 3000); // Poll every 3 seconds for UI responsiveness
         
         showToast('System is now listening for subject: ' + fullSubject, 'Test Started');
-    });
+    }
 
     document.getElementById('copySubjectBtn').addEventListener('click', function() {
         const text = document.getElementById('testSubject').value;
@@ -185,8 +197,14 @@
     function checkTest() {
         if (!currentTestId) return;
         
-        fetch('/api/mail-tester/check/' + currentTestId)
-            .then(res => res.json())
+        fetch('/api/mail-tester/check/' + encodeURIComponent(currentTestId))
+            .then(res => {
+                if (res.status === 404) {
+                    stopTest("This test is no longer active. Please start a new one.");
+                    return {};
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.found) {
                     clearInterval(pollInterval);
@@ -214,7 +232,7 @@
         spamDiv.innerHTML = '';
         if (data.spam_report && data.spam_report.length > 0) {
             data.spam_report.forEach(f => {
-                spamDiv.innerHTML += `<span class="badge bg-${f.status} border" title="${f.label}">${f.label}: <strong>${f.value}</strong></span>`;
+                spamDiv.innerHTML += `<span class="badge bg-${escapeHTML(f.status)} border" title="${escapeHTML(f.label)}">${escapeHTML(f.label)}: <strong>${escapeHTML(f.value)}</strong></span>`;
             });
         } else {
             spamDiv.innerHTML = '<span class="text-muted small italic">No specific spam headers found (X-Forefront, SpamAssassin, etc.)</span>';

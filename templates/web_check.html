@@ -31,7 +31,7 @@
                     </label>
                 </div>
                 <div class="d-grid gap-2">
-                    <button class="btn btn-primary btn-lg" onclick="grantPermission()">
+                    <button class="btn btn-primary btn-lg" id="grantPermissionBtn">
                         <i class="fa-solid fa-check-circle me-2"></i> Allow & Load Service
                     </button>
                     <a href="/" class="btn btn-link text-muted small">Cancel and Return</a>
@@ -48,7 +48,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     const STORAGE_KEY = 'webcheck_permission_granted';
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -58,6 +58,8 @@
             document.getElementById('permissionPrompt').style.display = 'block';
         }
     });
+
+    document.getElementById('grantPermissionBtn').addEventListener('click', grantPermission);
 
     function grantPermission() {
         if (document.getElementById('rememberChoice').checked) {
@@ -73,7 +75,7 @@
         const container = document.getElementById('webCheckContainer');
         const frame = document.getElementById('webCheckFrame');
         
-        frame.src = "{{ webcheck_url }}";
+        frame.src = {{ webcheck_url|tojson }};
         container.style.display = 'block';
     }
 </script>

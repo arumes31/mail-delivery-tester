@@ -4,9 +4,20 @@ import pytest
 import app as maildt
 
 
+def reset_rate_limits():
+    maildt.Base.metadata.create_all(maildt.engine)
+    session_db = maildt.Session()
+    try:
+        session_db.query(maildt.RateLimitEvent).delete()
+        session_db.query(maildt.GlobalCounter).filter_by(counter_name=maildt.TOTP_STEP_COUNTER).delete()
+        session_db.commit()
+    finally:
+        session_db.close()
+
+
 @pytest.fixture(autouse=True)
 def reset_auth_state(monkeypatch):
-    maildt.LOGIN_ATTEMPTS.clear()
+    reset_rate_limits()
     monkeypatch.setitem(maildt.CONFIG, 'ADMIN_TOTP_SECRET', None)
     yield
 
@@ -86,6 +97,51 @@ def test_totp_handoff_never_echoes_or_stores_password(client, monkeypatch):
     )
     assert response.status_code == 302
     assert response.headers['Location'] == '/settings'
+
+
+def test_totp_code_cannot_be_replayed(client, monkeypatch):
+    totp_secret = pyotp.random_base32()
+    monkeypatch.setitem(maildt.CONFIG, 'ADMIN_TOTP_SECRET', totp_secret)
+    code = pyotp.TOTP(totp_secret).now()
+
+    def login_with_code():
+        client.post(
+            '/login',
+            base_url='https://maildt.test',
+            data={
+                'csrf_token': csrf(client),
+                'username': maildt.CONFIG['ADMIN_USER'],
+                'password': maildt.CONFIG['ADMIN_PASSWORD'],
+            },
+        )
+        return client.post(
+            '/login',
+            base_url='https://maildt.test',
+            data={'csrf_token': csrf(client), 'totp': code},
+        )
+
+    assert login_with_code().status_code == 302
+    with client.session_transaction(base_url='https://maildt.test') as current:
+        current.clear()
+    response = login_with_code()
+    assert response.status_code == 200
+    assert b'Invalid TOTP code' in response.data
+
+
+def test_login_rate_limit_is_shared_through_the_database(client):
+    for _ in range(5):
+        client.post(
+            '/login',
+            base_url='https://maildt.test',
+            data={'csrf_token': csrf(client), 'username': 'nobody', 'password': 'wrong'},
+        )
+    session_db = maildt.Session()
+    try:
+        assert session_db.query(maildt.RateLimitEvent).filter_by(bucket='login').count() == 5
+    finally:
+        session_db.close()
+    response = client.get('/login', base_url='https://maildt.test')
+    assert b'Too many attempts' in response.data
 
 
 def test_smtp_diagnostic_requires_authentication_and_csrf(client):

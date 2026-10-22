@@ -13,13 +13,17 @@ MailDT intentionally fails closed:
 - deployment secrets can be mounted from files and the supplied Compose stacks do so
 - changing the signing key, administrator password, user, or TOTP secret invalidates every existing session
 - authentication stores a versioned user identity, not a forgeable `logged_in` boolean
-- TOTP handoff state expires after five minutes and never stores or returns the submitted password
+- TOTP handoff state expires after five minutes and never stores or returns the submitted password; each TOTP code is accepted only once
+- login and public tool rate limits are stored in the database, so they are shared by all Gunicorn workers and survive worker restarts
 - session cookies are always `Secure`, `HttpOnly`, and `SameSite=Lax`; deploy behind HTTPS
 - forwarded client/scheme/host headers are accepted only from `TRUSTED_PROXY_CIDRS`
 - state-changing administrator operations require a session-bound CSRF token
 - SMTP diagnostics require authentication, an exact host/port allowlist, and a public DNS result; IP literals, loopback, private, link-local, multicast, unspecified, reserved, and mixed public/private answers are rejected
 - the validated SMTP IP is dialed directly, preventing a second DNS lookup from rebinding the connection
-- decoder HTTP requests require HTTPS, do not follow redirects, have connect/read deadlines, and reject responses above 512 KiB
+- decoder HTTP requests require HTTPS, do not follow redirects, have connect/read deadlines, and reject responses above 512 KiB; anonymous decoder runs perform no DNS or IP-geolocation lookups, and decoder errors are logged server-side instead of returned
+- the Content-Security-Policy allows only same-origin scripts and inline scripts carrying a per-request nonce; untrusted values (mail headers, decoder output, remote SMTP replies) are HTML-escaped before rendering
+- Pin links must be absolute `http(s)` URLs, and Pin icons must be PNG, JPEG, GIF, WebP, or ICO files (max 512 KB, detected by content); icons are served with a fixed image type and a sandboxing CSP
+- Mail Tester IDs are generated server-side and bound to the browser session that started the test; history queries return at most 500 rows, and anonymous callers can only filter by the masked recipient shown on the dashboard
 - the container runs as UID/GID 65532, has no runtime package manager, and is deployed read-only with all Linux capabilities dropped
 
 The normal configured SMTP/IMAP monitor can reach private mail infrastructure. The interactive SMTP diagnostic is deliberately stricter because it accepts a browser-supplied target.

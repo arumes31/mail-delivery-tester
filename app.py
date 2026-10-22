@@ -26,6 +26,7 @@ import pyotp
 import requests
 from flask import (
     Flask,
+    g,
     jsonify,
     redirect,
     render_template,
@@ -34,13 +35,15 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, desc
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, create_engine, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
-from werkzeug.utils import secure_filename
 
 from security import (
+    WIDGET_ICON_TYPES,
     SMTPDestinationError,
     TrustedProxyMiddleware,
+    detect_image_type,
     parse_allowed_hosts,
     parse_allowed_ports,
     parse_cidrs,
@@ -48,7 +51,10 @@ from security import (
     read_secret,
     resolve_smtp_destination,
     safe_login_endpoint,
+    safe_widget_color,
+    safe_widget_url,
     session_version,
+    totp_matched_step,
 )
 from spam_decoder import decode_spam_headers
 
@@ -234,6 +240,14 @@ class ActiveTestSignal(Base):
     __tablename__ = 'active_test_signals'
     test_id = Column(String(50), primary_key=True)
     created_at = Column(DateTime, default=utc_now)
+
+class RateLimitEvent(Base):
+    __tablename__ = 'rate_limit_events'
+    __table_args__ = (Index('ix_rate_limit_events_lookup', 'bucket', 'client_key', 'created_at'),)
+    id = Column(Integer, primary_key=True)
+    bucket = Column(String(30), nullable=False)
+    client_key = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
 
 class CustomWidget(Base):
     __tablename__ = 'custom_widgets'
@@ -594,12 +608,81 @@ def send_probe_email():
     finally:
         session.close()
 
-# --- Global state for fast polling & rate limiting ---
-IP_RATE_LIMITS = {} # {ip: [timestamps]}
-LOGIN_ATTEMPTS = {} # {ip: [timestamps]}
-BLACKLIST_ATTEMPTS = {} # {ip: [timestamps]}
-DECODE_SPAM_ATTEMPTS = {} # {ip: [timestamps]}
+# --- Global state for fast polling ---
 LAST_IMAP_CHECK = datetime.datetime.min
+
+# --- Rate limiting ---
+# Hits are stored in the database so limits are shared by all Gunicorn workers
+# and survive worker recycling. Each check prunes expired hits for its bucket.
+RATE_LIMIT_WINDOW = 60
+TOTP_STEP_COUNTER = 'auth:totp_last_step'
+
+def check_rate_limit(bucket, limit, record=True, window=RATE_LIMIT_WINDOW):
+    """Returns (allowed, retry_after, remaining) for the caller's IP, recording a hit when allowed."""
+    client_key = (request.remote_addr or 'unknown')[:64]
+    now = utc_now()
+    session_db = Session()
+    try:
+        session_db.query(RateLimitEvent).filter(
+            RateLimitEvent.bucket == bucket,
+            RateLimitEvent.created_at < now - datetime.timedelta(seconds=window),
+        ).delete(synchronize_session=False)
+        hits = session_db.query(RateLimitEvent.created_at).filter_by(
+            bucket=bucket, client_key=client_key
+        ).order_by(RateLimitEvent.created_at).all()
+        if len(hits) >= limit:
+            session_db.commit()
+            retry_after = max(1, int(window - (now - hits[0][0]).total_seconds()))
+            return False, retry_after, 0
+        if record:
+            session_db.add(RateLimitEvent(bucket=bucket, client_key=client_key, created_at=now))
+        session_db.commit()
+        return True, 0, limit - len(hits) - (1 if record else 0)
+    except Exception as e:
+        # Fail closed: an unavailable limiter must not disable brute-force protection.
+        logger.error("Rate limit check failed (%s)", type(e).__name__)
+        session_db.rollback()
+        return False, window, 0
+    finally:
+        session_db.close()
+
+def clear_rate_limit(bucket):
+    """Forgets the caller's hits for a bucket (e.g. after a successful login)."""
+    session_db = Session()
+    try:
+        session_db.query(RateLimitEvent).filter_by(
+            bucket=bucket, client_key=(request.remote_addr or 'unknown')[:64]
+        ).delete(synchronize_session=False)
+        session_db.commit()
+    except Exception as e:
+        logger.error("Rate limit reset failed (%s)", type(e).__name__)
+        session_db.rollback()
+    finally:
+        session_db.close()
+
+def consume_totp_step(step):
+    """Accepts each TOTP time step at most once so a code cannot be replayed."""
+    session_db = Session()
+    try:
+        if not session_db.query(GlobalCounter).filter_by(counter_name=TOTP_STEP_COUNTER).first():
+            try:
+                session_db.add(GlobalCounter(counter_name=TOTP_STEP_COUNTER, count=0))
+                session_db.commit()
+            except IntegrityError:
+                session_db.rollback()
+        # Conditional update keeps the check atomic across workers.
+        updated = session_db.query(GlobalCounter).filter(
+            GlobalCounter.counter_name == TOTP_STEP_COUNTER,
+            GlobalCounter.count < step,
+        ).update({GlobalCounter.count: step}, synchronize_session=False)
+        session_db.commit()
+        return updated == 1
+    except Exception as e:
+        logger.error("TOTP replay check failed (%s)", type(e).__name__)
+        session_db.rollback()
+        return False
+    finally:
+        session_db.close()
 
 # Cache for stats overview
 STATS_CACHE = {
@@ -1031,7 +1114,14 @@ def health():
 
 @app.context_processor
 def inject_config():
-    return dict(config=CONFIG, is_authenticated=is_authenticated())
+    return dict(config=CONFIG, is_authenticated=is_authenticated(), csp_nonce=csp_nonce())
+
+
+def csp_nonce():
+    """Per-request nonce that authorizes the templates' own inline scripts."""
+    if 'csp_nonce' not in g:
+        g.csp_nonce = secrets.token_urlsafe(16)
+    return g.csp_nonce
 
 # Forwarded headers are authoritative only from explicitly trusted immediate peers.
 if CONFIG['TRUSTED_PROXY_CIDRS']:
@@ -1043,13 +1133,15 @@ if CONFIG['TRUSTED_PROXY_CIDRS']:
 
 @app.after_request
 def apply_security_headers(response):
-    response.headers['Content-Security-Policy'] = (
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' "
-        "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; script-src 'self' "
-        "'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: "
-        "https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; "
-        "base-uri 'self'; form-action 'self'"
-    )
+    # Routes serving user content (custom icons) set a stricter policy themselves.
+    if 'Content-Security-Policy' not in response.headers:
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' "
+            "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+            f"script-src 'self' 'nonce-{csp_nonce()}'; font-src 'self' data: "
+            "https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; "
+            "base-uri 'self'; form-action 'self'; object-src 'none'"
+        )
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -1110,14 +1202,9 @@ def login_required(f):
 def login():
     # Rate Limiting: 5 login attempts per minute per IP
     now = time.time()
-    ip = request.remote_addr or 'unknown'
 
-    if ip not in LOGIN_ATTEMPTS:
-        LOGIN_ATTEMPTS[ip] = []
-    LOGIN_ATTEMPTS[ip] = [t for t in LOGIN_ATTEMPTS[ip] if now - t < 60]
-
-    if len(LOGIN_ATTEMPTS[ip]) >= 5:
-        retry_after = int(60 - (now - LOGIN_ATTEMPTS[ip][0]))
+    allowed, retry_after, _ = check_rate_limit('login', 5, record=False)
+    if not allowed:
         return render_template('login.html', error=f"Too many attempts. Please wait {retry_after}s.", show_totp=False, retry_after=retry_after)
 
     if request.method == 'POST':
@@ -1133,7 +1220,9 @@ def login():
         totp_code = request.form.get('totp')
         
         # Track attempt
-        LOGIN_ATTEMPTS[ip].append(now)
+        allowed, retry_after, _ = check_rate_limit('login', 5)
+        if not allowed:
+            return render_template('login.html', error=f"Too many attempts. Please wait {retry_after}s.", show_totp=False, retry_after=retry_after)
 
         pending_user = session.get('pending_totp_user')
         pending_at = session.get('pending_totp_at', 0)
@@ -1143,7 +1232,8 @@ def login():
                 and now - float(pending_at) <= 300
             )
             totp = pyotp.TOTP(CONFIG['ADMIN_TOTP_SECRET'])
-            if not pending_valid or not totp.verify(totp_code, valid_window=1):
+            step = totp_matched_step(totp, totp_code, datetime.datetime.now(datetime.UTC))
+            if not pending_valid or step is None or not consume_totp_step(step):
                 return render_template(
                     'login.html', error='Invalid TOTP code', show_totp=True
                 )
@@ -1171,7 +1261,7 @@ def login():
         session['session_version'] = AUTH_SESSION_VERSION
         session.permanent = True
         csrf_token()
-        LOGIN_ATTEMPTS.pop(ip, None)
+        clear_rate_limit('login')
         if next_endpoint == 'settings':
             destination = url_for('settings')
         elif next_endpoint == 'homepage':
@@ -1401,24 +1491,13 @@ def decode_spam_page():
 @app.route('/api/decode-spam', methods=['POST'])
 def api_decode_spam():
     # Rate Limiting: 5 per minute per IP
-    now = time.time()
-    ip_addr = request.remote_addr or 'unknown'
-
-    if ip_addr not in DECODE_SPAM_ATTEMPTS:
-        DECODE_SPAM_ATTEMPTS[ip_addr] = []
-    
-    DECODE_SPAM_ATTEMPTS[ip_addr] = [t for t in DECODE_SPAM_ATTEMPTS[ip_addr] if now - t < 60]
-    
-    if len(DECODE_SPAM_ATTEMPTS[ip_addr]) >= 5:
-        retry_after = int(60 - (now - DECODE_SPAM_ATTEMPTS[ip_addr][0]))
+    allowed, retry_after, remaining = check_rate_limit('decode-spam', 5)
+    if not allowed:
         return jsonify({
             'error': 'Rate limit exceeded', 
             'message': f'Please wait {retry_after} seconds before running another analysis.',
             'retry_after': retry_after
         }), 429
-    
-    DECODE_SPAM_ATTEMPTS[ip_addr].append(now)
-    remaining = 5 - len(DECODE_SPAM_ATTEMPTS[ip_addr])
 
     raw_headers = request.json.get('headers', '').strip()
     if not raw_headers:
@@ -1436,7 +1515,9 @@ def api_decode_spam():
             tmp.write(raw_headers)
             tmp_path = tmp.name
 
-        # 2. Run the decoder
+        # 2. Run the decoder. Only authenticated users may make the server perform
+        # DNS and IP-geolocation lookups for addresses found in the pasted headers.
+        resolve_flag = '-r' if is_authenticated() else '-R'
         if legacy:
             # Run the official script directly, forcing TTY to preserve colors (colorama strips them otherwise)
             cmd = [
@@ -1444,18 +1525,21 @@ def api_decode_spam():
                 "import sys; sys.stdout.isatty = lambda: True; "
                 "import decode_spam_headers_official; "
                 "decode_spam_headers_official.main(sys.argv[1:])",
-                '-r', tmp_path
+                resolve_flag, tmp_path
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
         else:
             # Run via wrapper for modern JSON output with bug fixes
-            cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', '-r', tmp_path]
+            cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', resolve_flag, tmp_path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
         
         if result.returncode != 0:
-            # Try to see if it's because of missing dependencies or actual script error
-            error_msg = result.stderr if result.stderr else "Script execution failed"
-            return jsonify({'error': f'Decoder error: {error_msg}'}), 500
+            # Keep tracebacks and paths server-side; callers only get a generic error.
+            logger.error(
+                "Decoder exited with status %s: %s",
+                result.returncode, (result.stderr or '').strip()[-1000:],
+            )
+            return jsonify({'error': 'Decoder failed to analyze the supplied headers'}), 500
 
         if legacy:
             return jsonify({'legacy_output': result.stdout, 'remaining_quota': remaining})
@@ -1500,25 +1584,14 @@ def web_check_page():
 
 @app.route('/api/diagnostics/blacklist')
 def api_blacklist_check():
-    # Rate Limiting: 5 per minute per IP
-    now = time.time()
-    ip_addr = request.remote_addr or 'unknown'
-
-    if ip_addr not in BLACKLIST_ATTEMPTS:
-        BLACKLIST_ATTEMPTS[ip_addr] = []
-    
-    BLACKLIST_ATTEMPTS[ip_addr] = [t for t in BLACKLIST_ATTEMPTS[ip_addr] if now - t < 60]
-    
-    if len(BLACKLIST_ATTEMPTS[ip_addr]) >= 2:
-        retry_after = int(60 - (now - BLACKLIST_ATTEMPTS[ip_addr][0]))
+    # Rate Limiting: 2 per minute per IP
+    allowed, retry_after, remaining = check_rate_limit('blacklist', 2)
+    if not allowed:
         return jsonify({
             'error': 'Rate limit exceeded', 
             'message': f'Please wait {retry_after} seconds before running another check.',
             'retry_after': retry_after
         }), 429
-    
-    BLACKLIST_ATTEMPTS[ip_addr].append(now)
-    remaining = 2 - len(BLACKLIST_ATTEMPTS[ip_addr])
 
     record_usage('blacklist')
 
@@ -1628,25 +1701,13 @@ def api_blacklist_check():
 @csrf_protected
 def api_smtp_test():
     # Rate Limiting: 5 per minute per IP
-    now = time.time()
-    ip = request.remote_addr or 'unknown'
-
-    if ip not in IP_RATE_LIMITS:
-        IP_RATE_LIMITS[ip] = []
-    
-    # Filter history for last 60 seconds
-    IP_RATE_LIMITS[ip] = [t for t in IP_RATE_LIMITS[ip] if now - t < 60]
-    
-    if len(IP_RATE_LIMITS[ip]) >= 5:
-        retry_after = int(60 - (now - IP_RATE_LIMITS[ip][0]))
+    allowed, retry_after, remaining = check_rate_limit('smtp-diag', 5)
+    if not allowed:
         return jsonify({
             'error': 'Rate limit exceeded', 
             'message': f'Please wait {retry_after} seconds before running another test.',
             'retry_after': retry_after
         }), 429
-    
-    IP_RATE_LIMITS[ip].append(now)
-    remaining = 5 - len(IP_RATE_LIMITS[ip])
     
     record_usage('smtp-diag')
     
@@ -1794,11 +1855,22 @@ def api_smtp_test():
         'remaining_quota': remaining
     })
 
+# Mail tester IDs are generated server-side and bound to the requesting browser session.
+MAIL_TESTS_PER_SESSION = 5
+MAX_ACTIVE_MAIL_TESTS = 100
+
 @app.route('/api/mail-tester/check/<test_id>')
 def api_mail_tester_check(test_id):
-    session = Session()
+    if test_id not in session.get('mail_tests', []):
+        return jsonify({'error': 'Unknown test ID'}), 404
+    # The UI polls every 3 seconds; allow some headroom for several open tabs.
+    allowed, retry_after, _ = check_rate_limit('mail-tester-check', 60)
+    if not allowed:
+        return jsonify({'error': 'Rate limit exceeded', 'retry_after': retry_after}), 429
+
+    session_db = Session()
     try:
-        test = session.query(MailTest).filter_by(test_id=test_id).first()
+        test = session_db.query(MailTest).filter_by(test_id=test_id).first()
         if test:
             # Prepare data to return
             result = {
@@ -1815,36 +1887,50 @@ def api_mail_tester_check(test_id):
             }
             
             # If found, we can remove from active tracking
-            session.query(ActiveTestSignal).filter_by(test_id=test_id).delete()
+            session_db.query(ActiveTestSignal).filter_by(test_id=test_id).delete()
             
             # Remove from database so it's only "received" once
-            session.delete(test)
-            session.commit()
+            session_db.delete(test)
+            session_db.commit()
+            session['mail_tests'] = [t for t in session.get('mail_tests', []) if t != test_id]
             
             return jsonify(result)
         return jsonify({'found': False})
     finally:
-        session.close()
+        session_db.close()
 
-@app.route('/api/mail-tester/start/<test_id>', methods=['POST'])
-def api_mail_tester_start(test_id):
+@app.route('/api/mail-tester/start', methods=['POST'])
+@csrf_protected
+def api_mail_tester_start():
+    allowed, retry_after, _ = check_rate_limit('mail-tester-start', 5)
+    if not allowed:
+        return jsonify({
+            'error': 'Rate limit exceeded',
+            'message': f'Please wait {retry_after} seconds before starting another test.',
+            'retry_after': retry_after
+        }), 429
+
+    test_id = secrets.token_urlsafe(16)
     session_db = Session()
     try:
         # Use database to signal active tests across workers
-        existing = session_db.query(ActiveTestSignal).filter_by(test_id=test_id).first()
-        if not existing:
-            new_signal = ActiveTestSignal(test_id=test_id)
-            session_db.add(new_signal)
-            session_db.commit()
+        cutoff = utc_now() - datetime.timedelta(minutes=10)
+        active = session_db.query(ActiveTestSignal).filter(ActiveTestSignal.created_at >= cutoff).count()
+        if active >= MAX_ACTIVE_MAIL_TESTS:
+            return jsonify({'error': 'Too many active tests. Please try again in a few minutes.'}), 503
+        session_db.add(ActiveTestSignal(test_id=test_id))
+        session_db.commit()
     except Exception as e:
         logger.error("Failed to start active test signal (%s)", type(e).__name__)
         session_db.rollback()
+        return jsonify({'error': 'Failed to start test'}), 500
     finally:
         session_db.close()
 
+    session['mail_tests'] = (session.get('mail_tests', []) + [test_id])[-MAIL_TESTS_PER_SESSION:]
     record_usage('mail-tester')
-    logger.info(f"Fast polling signal recorded for test: {test_id}")
-    return jsonify({'status': 'started'})
+    logger.info("Fast polling signal recorded for a new mail test")
+    return jsonify({'status': 'started', 'test_id': test_id})
 
 
 
@@ -1949,6 +2035,24 @@ def update_recipient(r_id):
     finally:
         session.close()
 
+MAX_ICON_BYTES = 512 * 1024
+INVALID_WIDGET_URL = 'URL must be an absolute http:// or https:// link'
+
+def save_widget_icon(file):
+    """Stores an uploaded raster icon under a server-chosen name and returns its URL path."""
+    data = file.read(MAX_ICON_BYTES + 1)
+    if len(data) > MAX_ICON_BYTES:
+        raise ValueError('Icon must be at most 512 KB')
+    # The extension (and therefore the served Content-Type) comes from the magic bytes,
+    # never from the client-supplied filename, so HTML/SVG payloads are rejected.
+    ext = detect_image_type(data)
+    if ext is None:
+        raise ValueError('Icon must be a PNG, JPEG, GIF, WebP or ICO image')
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    with open(os.path.join(UPLOAD_FOLDER, filename), 'wb') as fh:
+        fh.write(data)
+    return f"/custom_icons/{filename}"
+
 @app.route('/api/widgets', methods=['GET', 'POST'])
 @login_required
 @csrf_protected
@@ -1964,23 +2068,27 @@ def api_widgets():
         elif request.method == 'POST':
             # Handle multipart form data
             title = request.form.get('title')
-            url = request.form.get('url')
+            raw_url = request.form.get('url')
             icon = request.form.get('icon', 'fa-link')
             if not icon: icon = 'fa-link' # Fallback
-            color = request.form.get('color', '#8a2be2')
+            color = safe_widget_color(request.form.get('color'), '#8a2be2')
             size = request.form.get('size', 'small')
             is_private = request.form.get('is_private', 'false').lower() == 'true'
             
-            if not title or not url:
+            if not title or not raw_url:
                 return jsonify({'error': 'Title and URL required'}), 400
+            url = safe_widget_url(raw_url)
+            if not url:
+                return jsonify({'error': INVALID_WIDGET_URL}), 400
 
             image_path = None
             if 'icon_file' in request.files:
                 file = request.files['icon_file']
                 if file and file.filename:
-                    filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
-                    file.save(os.path.join(UPLOAD_FOLDER, filename))
-                    image_path = f"/custom_icons/{filename}"
+                    try:
+                        image_path = save_widget_icon(file)
+                    except ValueError as e:
+                        return jsonify({'error': str(e)}), 400
 
             new_w = CustomWidget(
                 title=title,
@@ -2000,7 +2108,17 @@ def api_widgets():
 
 @app.route('/custom_icons/<filename>')
 def serve_custom_icon(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    mimetype = WIDGET_ICON_TYPES.get('jpg' if ext == 'jpeg' else ext)
+    if mimetype:
+        response = send_from_directory(UPLOAD_FOLDER, filename, mimetype=mimetype)
+    else:
+        # Uploads that predate type validation are downloaded, never rendered inline.
+        response = send_from_directory(
+            UPLOAD_FOLDER, filename, mimetype='application/octet-stream', as_attachment=True
+        )
+    response.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
+    return response
 
 @app.route('/api/widgets/reorder', methods=['POST'])
 @login_required
@@ -2050,18 +2168,26 @@ def api_widget_detail(w_id):
             # Support both JSON and multipart for updates
             if request.is_json:
                 data = request.json
+                if 'url' in data:
+                    url = safe_widget_url(data.get('url'))
+                    if not url:
+                        return jsonify({'error': INVALID_WIDGET_URL}), 400
+                    widget.url = url
                 widget.title = data.get('title', widget.title)
-                widget.url = data.get('url', widget.url)
                 widget.icon = data.get('icon', widget.icon)
-                widget.color = data.get('color', widget.color)
+                widget.color = safe_widget_color(data.get('color'), widget.color)
                 widget.size = data.get('size', widget.size)
                 widget.is_private = data.get('is_private', widget.is_private)
                 widget.order = data.get('order', widget.order)
             else:
+                if 'url' in request.form:
+                    url = safe_widget_url(request.form.get('url'))
+                    if not url:
+                        return jsonify({'error': INVALID_WIDGET_URL}), 400
+                    widget.url = url
                 widget.title = request.form.get('title', widget.title)
-                widget.url = request.form.get('url', widget.url)
                 widget.icon = request.form.get('icon', widget.icon)
-                widget.color = request.form.get('color', widget.color)
+                widget.color = safe_widget_color(request.form.get('color'), widget.color)
                 widget.size = request.form.get('size', widget.size)
                 if 'is_private' in request.form:
                     widget.is_private = request.form.get('is_private').lower() == 'true'
@@ -2069,9 +2195,10 @@ def api_widget_detail(w_id):
                 if 'icon_file' in request.files:
                     file = request.files['icon_file']
                     if file and file.filename:
-                        filename = f"{uuid.uuid4()}_{secure_filename(file.filename)}"
-                        file.save(os.path.join(UPLOAD_FOLDER, filename))
-                        widget.image_path = f"/custom_icons/{filename}"
+                        try:
+                            widget.image_path = save_widget_icon(file)
+                        except ValueError as e:
+                            return jsonify({'error': str(e)}), 400
 
             session_db.commit()
             return jsonify({'message': 'Updated'})
@@ -2219,18 +2346,28 @@ def api_stats():
     finally:
         session_db.close()
 
+MAX_HISTORY_LIMIT = 500
+
 @app.route('/api/history')
 def api_history():
     """Returns history, optionally filtered by recipient."""
     session_db = Session()
     is_logged_in = is_authenticated()
     try:
-        limit = request.args.get('limit', 100, type=int)
+        limit = min(max(request.args.get('limit', 100, type=int), 1), MAX_HISTORY_LIMIT)
         recipient = request.args.get('recipient')
         
         query = session_db.query(EmailProbe)
-        if recipient:
+        if recipient and is_logged_in:
             query = query.filter_by(recipient_email=recipient)
+        elif recipient:
+            # Anonymous callers only see masked addresses, so they may filter by the
+            # masked form but cannot confirm whether a full address is monitored.
+            matches = [
+                email for (email,) in session_db.query(EmailProbe.recipient_email).distinct()
+                if mask_email(email) == recipient
+            ]
+            query = query.filter(EmailProbe.recipient_email.in_(matches))
             
         recent = query.order_by(desc(EmailProbe.sent_at)).limit(limit).all()
         

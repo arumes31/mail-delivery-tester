@@ -76,7 +76,7 @@
     </div>
     {% endif %}
 
-    {% if session.logged_in %}
+    {% if is_authenticated %}
     <div class="col">
         <a href="/dashboard" class="text-decoration-none h-100 d-block">
             <div class="card h-100 home-widget border-0 shadow-lg text-center p-3">
@@ -110,8 +110,8 @@
 <div class="row mb-2">
     <div class="col-md-12 d-flex justify-content-between align-items-center">
         <h6 class="text-white fw-bold opacity-50 mb-0 text-uppercase letter-spacing-1" style="font-size: 0.75rem;"><i class="fa-solid fa-thumbtack me-2 text-primary"></i> Pins</h6>
-        {% if session.logged_in %}
-        <button class="btn btn-xs btn-outline-primary py-0" onclick="openAddModal()" style="font-size: 0.7rem;">
+        {% if is_authenticated %}
+        <button class="btn btn-xs btn-outline-primary py-0" id="addPinBtn" style="font-size: 0.7rem;">
             <i class="fa-solid fa-plus me-1"></i> Pin
         </button>
         {% endif %}
@@ -130,13 +130,13 @@
     {% endif %}
     <div class="{{ col_class }}" id="widget-col-{{ widget.id }}" data-id="{{ widget.id }}">
         <div class="card h-100 home-widget border-0 shadow-lg p-3 position-relative" style="background: {{ widget.color }}15 !important; border-top: 2px solid {{ widget.color }} !important;">
-            {% if session.logged_in %}
+            {% if is_authenticated %}
             <div class="position-absolute top-0 end-0 p-1 d-flex" style="z-index: 5;">
-                <button class="btn btn-link btn-xs text-muted p-0 opacity-50 me-1" onclick='openEditModal({{ widget|tojson }})'><i class="fa-solid fa-edit" style="font-size: 0.6rem;"></i></button>
-                <button class="btn btn-link btn-xs text-muted p-0 opacity-50" onclick="deleteWidget({{ widget.id }}, '{{ widget.title }}')"><i class="fa-solid fa-times" style="font-size: 0.6rem;"></i></button>
+                <button class="btn btn-link btn-xs text-muted p-0 opacity-50 me-1" data-action="edit" data-widget='{{ widget|tojson }}'><i class="fa-solid fa-edit" style="font-size: 0.6rem;"></i></button>
+                <button class="btn btn-link btn-xs text-muted p-0 opacity-50" data-action="delete" data-id="{{ widget.id }}" data-title="{{ widget.title }}"><i class="fa-solid fa-times" style="font-size: 0.6rem;"></i></button>
             </div>
             {% endif %}
-            <a href="{{ widget.url }}" target="_blank" class="text-decoration-none text-center d-block">
+            <a href="{{ widget.url if widget.url.lower().startswith(('http://', 'https://')) else '#' }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-center d-block">
                 <div class="widget-icon mb-2 d-flex justify-content-center align-items-center" style="height: 48px;">
                     {% if widget.image_path %}
                         <img src="{{ widget.image_path }}" class="rounded-circle border" style="width: 48px; height: 48px; object-fit: cover; border-color: {{ widget.color }} !important;">
@@ -152,7 +152,7 @@
     {% endfor %}
 </div>
 
-{% if session.logged_in %}
+{% if is_authenticated %}
 <!-- Delete Confirmation Modal -->
 <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
     <div class="modal-dialog">
@@ -240,7 +240,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary px-4" id="saveBtn" onclick="saveWidget()">Save Pin</button>
+                <button type="button" class="btn btn-primary px-4" id="saveBtn">Save Pin</button>
             </div>
         </div>
     </div>
@@ -295,7 +295,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     // Subtle Fly-in Notification
     document.addEventListener('DOMContentLoaded', () => {
         const notify = document.getElementById('welcome-notification');
@@ -313,7 +313,7 @@
         }
     });
 
-    {% if session.logged_in %}
+    {% if is_authenticated %}
     // Initialize Drag & Drop reordering
     const el = document.getElementById('custom-widgets-list');
     const sortable = Sortable.create(el, {
@@ -338,6 +338,16 @@
     const widgetModal = new bootstrap.Modal(document.getElementById('widgetModal'));
     const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
     let widgetToDeleteId = null;
+
+    // Buttons are wired here because the CSP blocks inline event handlers.
+    document.getElementById('addPinBtn').addEventListener('click', openAddModal);
+    document.getElementById('saveBtn').addEventListener('click', saveWidget);
+    el.addEventListener('click', function(e) {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        if (btn.dataset.action === 'edit') openEditModal(JSON.parse(btn.dataset.widget));
+        else if (btn.dataset.action === 'delete') deleteWidget(Number(btn.dataset.id), btn.dataset.title);
+    });
 
     function openAddModal() {
         document.getElementById('w-id').value = '';
@@ -394,7 +404,9 @@
             if (res.ok) {
                 location.reload();
             } else {
-                showToast('Failed to save Pin.', 'Error', 'danger');
+                res.json()
+                    .then(d => showToast(d.error || 'Failed to save Pin.', 'Error', 'danger'))
+                    .catch(() => showToast('Failed to save Pin.', 'Error', 'danger'));
             }
         });
     }
