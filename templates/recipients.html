@@ -150,11 +150,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-    const escapeHTML = str => String(str || '').replace(/[&<>'"]/g, tag => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-    }[tag]));
-
+<script nonce="{{ csp_nonce }}">
     function updateSchedulerStatus() {
         const badge = document.getElementById('schedulerStatusBadge');
         fetch('/api/scheduler/health')
@@ -215,10 +211,10 @@
                                 </div>
                             </td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-success me-1" onclick="saveRecipient(${r.id})" title="Save Changes">
+                                <button class="btn btn-sm btn-outline-success me-1" data-action="save" data-id="${r.id}" title="Save Changes">
                                     <i class="fa-solid fa-save"></i>
                                 </button>
-                                <button class="btn btn-sm btn-outline-danger" data-email="${escapeHTML(r.email)}" onclick="confirmDelete(${r.id}, this.getAttribute('data-email'))" title="Delete">
+                                <button class="btn btn-sm btn-outline-danger" data-action="delete" data-id="${r.id}" data-email="${escapeHTML(r.email)}" title="Delete">
                                     <i class="fa-solid fa-trash"></i>
                                 </button>
                             </td>
@@ -228,6 +224,15 @@
                 });
             });
     }
+
+    // Row buttons are wired via delegation; the CSP blocks inline event handlers.
+    document.getElementById('recipients-list').addEventListener('click', function(e) {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const id = Number(btn.dataset.id);
+        if (btn.dataset.action === 'save') saveRecipient(id);
+        else if (btn.dataset.action === 'delete') confirmDelete(id, btn.dataset.email);
+    });
 
     let recipientIdToDelete = null;
     const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));

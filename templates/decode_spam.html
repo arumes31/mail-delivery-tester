@@ -57,7 +57,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     let countdownInterval = null;
 
     document.getElementById('decodeForm').addEventListener('submit', function(e) {
@@ -109,7 +109,7 @@
             
             if (data.error) {
                 showToast(data.error, 'Decoder Error', 'danger');
-                container.innerHTML = `<div class="col-12 text-center text-danger py-3"><strong>Error:</strong> ${data.error}</div>`;
+                container.innerHTML = `<div class="col-12 text-center text-danger py-3"><strong>Error:</strong> ${escapeHTML(data.error)}</div>`;
                 return;
             }
 
@@ -240,7 +240,9 @@
             const col = document.createElement('div');
             col.className = 'col-md-6 mb-4';
             
-            let analysisHtml = item.analysis.replace(/\n/g, '<br>');
+            // Decoder output echoes raw header values from the pasted message: escape
+            // everything first, then turn the (markup-free) colour markers into badges.
+            let analysisHtml = escapeHTML(item.analysis).replace(/\n/g, '<br>');
             
             // Use [\s\S]*? to match across lines and include all color codes
             analysisHtml = analysisHtml.replace(/__COLOR_31__\|([\s\S]*?)\|__END_COLOR__/g, '<span class="badge bg-danger shadow-sm border border-danger fw-bold px-2 py-1">$1</span>');
@@ -257,16 +259,16 @@
             col.innerHTML = `
                 <div class="card h-100 shadow-sm border-0">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <span class="fw-bold"><i class="fa-solid fa-microscope me-2 opacity-50"></i> ${item.name}</span>
+                        <span class="fw-bold"><i class="fa-solid fa-microscope me-2 opacity-50"></i> ${escapeHTML(item.name)}</span>
                         <span class="small opacity-50 font-monospace" style="font-size: 0.7rem;">#${index+1}</span>
                     </div>
                     <div class="card-body">
-                        ${item.header ? `<div class="mb-2 small text-primary fw-bold text-uppercase" style="font-size: 0.65rem;">Header: ${item.header}</div>` : ''}
-                        ${item.description ? `<p class="small text-muted italic mb-3">${item.description}</p>` : ''}
+                        ${item.header ? `<div class="mb-2 small text-primary fw-bold text-uppercase" style="font-size: 0.65rem;">Header: ${escapeHTML(item.header)}</div>` : ''}
+                        ${item.description ? `<p class="small text-muted italic mb-3">${escapeHTML(item.description)}</p>` : ''}
                         
                         <div class="bg-dark p-3 rounded border border-secondary mb-3">
                             <div class="small text-muted mb-1 fw-bold text-uppercase" style="font-size: 0.6rem;">Value:</div>
-                            <div class="font-monospace small text-white-50 overflow-auto" style="max-height: 100px;">${item.value}</div>
+                            <div class="font-monospace small text-white-50 overflow-auto" style="max-height: 100px;">${escapeHTML(item.value)}</div>
                         </div>
 
                         <div class="analysis-box">

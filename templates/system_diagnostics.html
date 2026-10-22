@@ -64,7 +64,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     document.getElementById('runDiagBtn').addEventListener('click', function() {
         const btn = this;
         btn.disabled = true;
@@ -125,11 +125,11 @@
             card.innerHTML = `
                 <div class="card-header bg-white d-flex justify-content-between align-items-center border-bottom">
                     <span class="fw-bold"><i class="fa-solid ${s.icon} me-2 text-primary"></i> ${s.title}</span>
-                    <span class="badge bg-${statusColor}">${result.status.toUpperCase()}</span>
+                    <span class="badge bg-${statusColor}">${escapeHTML(result.status.toUpperCase())}</span>
                 </div>
                 <div class="card-body p-0">
                     <ul class="list-group list-group-flush small font-monospace">
-                        ${result.details.map(d => `<li class="list-group-item py-2"><i class="fa-solid fa-chevron-right me-2 opacity-50"></i> ${d}</li>`).join('')}
+                        ${result.details.map(d => `<li class="list-group-item py-2"><i class="fa-solid fa-chevron-right me-2 opacity-50"></i> ${escapeHTML(d)}</li>`).join('')}
                     </ul>
                 </div>
             `;
