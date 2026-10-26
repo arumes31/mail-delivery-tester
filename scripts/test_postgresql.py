@@ -2,8 +2,9 @@
 import unittest
 import uuid
 
-import app
 from sqlalchemy import inspect
+
+import app
 
 
 class PostgreSQLStartupTest(unittest.TestCase):
