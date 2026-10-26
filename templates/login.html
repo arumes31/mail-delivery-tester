@@ -60,7 +60,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     {% if retry_after %}
     (function() {
         let remaining = {{ retry_after }};
