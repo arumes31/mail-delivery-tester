@@ -82,7 +82,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
     document.getElementById('smtpTestForm').addEventListener('submit', function(e) {
         e.preventDefault();
         const host = document.getElementById('hostInput').value;
@@ -103,7 +103,7 @@
         document.getElementById('reportCard').style.display = 'block';
         document.getElementById('transcriptCard').style.display = 'block';
         const tbody = document.getElementById('report-body');
-        tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Communicating with ' + host + ':' + port + '...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Communicating with ' + escapeHTML(host) + ':' + escapeHTML(port) + '...</td></tr>';
         document.getElementById('transcript').innerHTML = 'Connecting...';
         document.getElementById('overall-time').innerText = '';
 
@@ -186,9 +186,9 @@
 
             tbody.innerHTML += `
                 <tr>
-                    <td><span class="badge ${badgeClass} w-100 py-2">Status ${r.status}</span></td>
-                    <td class="fw-bold">${r.name}</td>
-                    <td>${r.info}</td>
+                    <td><span class="badge ${badgeClass} w-100 py-2">Status ${escapeHTML(r.status)}</span></td>
+                    <td class="fw-bold">${escapeHTML(r.name)}</td>
+                    <td>${escapeHTML(r.info)}</td>
                 </tr>
             `;
         });
@@ -200,13 +200,14 @@
             pre.innerHTML = 'No transcript captured.';
             return;
         }
+        // Transcript lines contain banners and replies from the remote SMTP server.
         pre.innerHTML = lines.map(line => {
             if (line.match(/^[0-9]{3}/)) {
-                return `<span style="color: #55ff55;">${line}</span>`;
+                return `<span style="color: #55ff55;">${escapeHTML(line)}</span>`;
             } else if (line.startsWith('Error:')) {
-                return `<span style="color: #ff5555;">${line}</span>`;
+                return `<span style="color: #ff5555;">${escapeHTML(line)}</span>`;
             }
-            return line;
+            return escapeHTML(line);
         }).join('\n');
     }
 </script>

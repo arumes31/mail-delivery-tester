@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="blur-container">
-    {% if not session.logged_in %}
+    {% if not is_authenticated %}
     <div class="login-overlay">
         <div class="overlay-card shadow-lg">
             <div class="mb-4">
@@ -19,7 +19,7 @@
     </div>
     {% endif %}
 
-    <div class="row {% if not session.logged_in %}blur-content{% endif %}">
+    <div class="row {% if not is_authenticated %}blur-content{% endif %}">
         <div class="col-lg-9 mb-4">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
@@ -196,8 +196,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-    const isLoggedIn = {{ 'true' if session.logged_in else 'false' }};
+<script nonce="{{ csp_nonce }}">
+    const isLoggedIn = {{ 'true' if is_authenticated else 'false' }};
 
     function getStatusBadge(status) {
         let color = 'secondary';
@@ -208,13 +208,13 @@
         else if (status === 'MISSING') { color = 'danger'; icon = 'fa-circle-exclamation'; }
         else if (status === 'SEND_ERROR') { color = 'dark'; icon = 'fa-circle-xmark'; }
         
-        return `<span class="badge bg-${color}"><i class="fa-solid ${icon} me-1"></i>${status}</span>`;
+        return `<span class="badge bg-${color}"><i class="fa-solid ${icon} me-1"></i>${escapeHTML(status)}</span>`;
     }
 
     function getAuthBadge(val) {
         if (!val || val === 'unknown') return '<span class="text-muted small">unknown</span>';
         const color = val === 'pass' ? 'success' : 'danger';
-        return `<span class="badge bg-${color} font-monospace" style="font-size: 0.7em;">${val.toUpperCase()}</span>`;
+        return `<span class="badge bg-${color} font-monospace" style="font-size: 0.7em;">${escapeHTML(val.toUpperCase())}</span>`;
     }
 
     function updateStats() {
@@ -271,17 +271,17 @@
                     const row = `
                         <tr class="${rowClass}">
                             <td class="fw-bold">
-                                ${item.recipient || '-'}
-                                <div class="small text-muted font-monospace" style="font-size: 0.75em; opacity: 0.7;">${item.guid}</div>
+                                ${escapeHTML(item.recipient || '-')}
+                                <div class="small text-muted font-monospace" style="font-size: 0.75em; opacity: 0.7;">${escapeHTML(item.guid)}</div>
                             </td>
                             <td>${getStatusBadge(item.status)}</td>
                             <td>${item.sent_at ? new Date(item.sent_at).toLocaleString() : '-'}</td>
-                            <td>${item.latency}s <small class="text-muted">/ ${item.alert_threshold}s</small></td>
+                            <td>${escapeHTML(item.latency)}s <small class="text-muted">/ ${escapeHTML(item.alert_threshold)}s</small></td>
                             <td>${getAuthBadge(item.spf)}</td>
                             <td>${getAuthBadge(item.dkim)}</td>
                             <td>${getAuthBadge(item.dmarc)}</td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-dark" onclick="showHistory('${item.recipient}')">
+                                <button class="btn btn-sm btn-outline-dark" data-recipient="${escapeHTML(item.recipient)}">
                                     <i class="fa-solid fa-list"></i> History
                                 </button>
                             </td>
@@ -314,12 +314,12 @@
                         <tr>
                             <td>${getStatusBadge(item.status)}</td>
                             <td class="small">${new Date(item.sent_at).toLocaleString()}</td>
-                            <td>${item.latency}s <small class="text-muted">/${item.alert_threshold}s</small></td>
+                            <td>${escapeHTML(item.latency)}s <small class="text-muted">/${escapeHTML(item.alert_threshold)}s</small></td>
                             <td>${getAuthBadge(item.spf)}</td>
                             <td>${getAuthBadge(item.dkim)}</td>
                             <td>${getAuthBadge(item.dmarc)}</td>
                             <td>
-                                <span class="guid-text user-select-all" style="font-size: 0.8em;">${item.guid}</span>
+                                <span class="guid-text user-select-all" style="font-size: 0.8em;">${escapeHTML(item.guid)}</span>
                             </td>
                         </tr>
                     `;
@@ -327,6 +327,12 @@
                 });
             });
     }
+
+    // History buttons are wired via delegation; the CSP blocks inline event handlers.
+    document.getElementById('stats-body').addEventListener('click', function(e) {
+        const btn = e.target.closest('button[data-recipient]');
+        if (btn) showHistory(btn.dataset.recipient);
+    });
 
     // Initial load and periodic refresh
     updateStats();

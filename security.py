@@ -6,10 +6,12 @@ configuration and network policies can be tested without starting the service.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import hmac
 import ipaddress
 import os
+import re
 import socket
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -227,3 +229,62 @@ def resolve_smtp_destination(
             )
         public_addresses.append(str(parsed))
     return public_addresses[0], port
+
+
+# Raster formats accepted for widget icons, keyed by served extension.
+WIDGET_ICON_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "ico": "image/x-icon",
+}
+WIDGET_URL_SCHEMES = frozenset({"http", "https"})
+_WIDGET_COLOR = re.compile(r"#[0-9a-fA-F]{3,8}")
+
+
+def detect_image_type(data: bytes) -> str | None:
+    """Return the icon extension matching the file's magic bytes, or None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data.startswith(b"\x00\x00\x01\x00"):
+        return "ico"
+    return None
+
+
+def safe_widget_url(candidate: str | None) -> str | None:
+    """Return an absolute http(s) URL suitable for a public link, or None."""
+    if not candidate:
+        return None
+    url = candidate.strip()
+    if not url or len(url) > 255 or any(ord(char) < 32 for char in url):
+        return None
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in WIDGET_URL_SCHEMES or not parsed.netloc:
+        return None
+    return url
+
+
+def safe_widget_color(candidate: str | None, default: str) -> str:
+    """Accept only hex colours because the value is rendered into style attributes."""
+    if candidate and _WIDGET_COLOR.fullmatch(candidate.strip()):
+        return candidate.strip()
+    return default
+
+
+def totp_matched_step(totp, code: str | None, for_time: datetime.datetime, valid_window: int = 1) -> int | None:
+    """Return the TOTP time step that CODE matches within the window, or None."""
+    if not code:
+        return None
+    current = totp.timecode(for_time)
+    for offset in range(-valid_window, valid_window + 1):
+        step = current + offset
+        if hmac.compare_digest(str(code), totp.generate_otp(step)):
+            return step
+    return None

@@ -16,7 +16,10 @@ ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-RUN apt-get update \
+# CI changes this value on each build so cached layers cannot retain revoked CAs.
+ARG RUNTIME_APT_REFRESH=manual
+RUN printf 'Runtime package refresh: %s\n' "$RUNTIME_APT_REFRESH" \
+    && apt-get update \
     && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 65532 maildt \
