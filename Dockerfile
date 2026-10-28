@@ -29,9 +29,9 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=65532:65532 . .
 RUN rm -rf /opt/venv/bin/pip* \
-        /opt/venv/lib/python3.14/site-packages/pip* \
-        /usr/local/lib/python3.14/ensurepip \
-        /usr/local/lib/python3.14/site-packages/pip* \
+        /opt/venv/lib/python3.15/site-packages/pip* \
+        /usr/local/lib/python3.15/ensurepip \
+        /usr/local/lib/python3.15/site-packages/pip* \
     && mkdir -p /app/data /app/data-web/custom_icons \
     && chown -R 65532:65532 /app/data /app/data-web
 
