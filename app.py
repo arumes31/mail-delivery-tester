@@ -151,6 +151,9 @@ logger = logging.getLogger(__name__)
 
 # --- Database Setup ---
 def get_engine(url, max_retries=5, delay=5):
+    # Keep the installed driver when SQLAlchemy changes its PostgreSQL default.
+    if url.startswith('postgresql://'):
+        url = 'postgresql+psycopg2://' + url[len('postgresql://'):]
     for i in range(max_retries):
         try:
             e = create_engine(url, pool_pre_ping=True, pool_recycle=300)
