@@ -209,6 +209,11 @@ options = {
     'dont_resolve' : False,
 }
 
+# Bounds that keep analysis work and report size proportional to the input.
+MAX_RECEIVED_LENGTH = 4096
+MAX_HOP_INDENT_DEPTH = 8
+MAX_MSFBL_PART_LENGTH = 16384
+
 class Logger:
     colors_map = {
         'red':      31, 
@@ -252,39 +257,37 @@ class Logger:
         #return "\x1b[%dm%s\x1b[0m" % (c, s)
         return f'__COLOR_{c}__|{s}|__END_COLOR__'
 
+    COLOR_MARKER_RE = re.compile(r'__COLOR_(\d{1,3})__\||\|__END_COLOR__')
+
     @staticmethod
-    def replaceColors(s, colorizingFunc):
+    def replaceColors(s, colorizingFunc, literalFunc = None):
+        # Single forward pass over color markers. Header text that looks like a
+        # marker can never stall the scan, and unbalanced markers stay literal.
+        if literalFunc is None:
+            literalFunc = lambda txt: txt
+
+        stack = [(None, None, [])]
         pos = 0
 
-        while pos < len(s):
-            if s[pos:].startswith('__COLOR_'):
-                pos += len('__COLOR_')
-                pos1 = s[pos:].find('__|')
+        for m in Logger.COLOR_MARKER_RE.finditer(s):
+            stack[-1][2].append(literalFunc(s[pos:m.start()]))
+            pos = m.end()
 
-                assert pos1 != -1, "Output colors mismatch - could not find pos of end of color number!"
+            if m.group(1) is not None:
+                stack.append((int(m.group(1)), m.group(0), []))
+            elif len(stack) > 1:
+                c, _, parts = stack.pop()
+                stack[-1][2].append(colorizingFunc(c, ''.join(parts)))
+            else:
+                stack[-1][2].append(literalFunc(m.group(0)))
 
-                c = int(s[pos:pos+pos1])
-                pos += pos1 + len('__|')
-                pos2 = s[pos:].find('|__END_COLOR__')
+        stack[-1][2].append(literalFunc(s[pos:]))
 
-                assert pos2 != -1, "Output colors mismatch - could not find end of color marker!"
+        while len(stack) > 1:
+            _, marker, parts = stack.pop()
+            stack[-1][2].append(literalFunc(marker) + ''.join(parts))
 
-                txt = s[pos:pos+pos2]
-                pos += pos2 + len('|__END_COLOR__')
-
-                patt = f'__COLOR_{c}__|{txt}|__END_COLOR__'
-
-                colored = colorizingFunc(c, txt)
-
-                assert len(colored) > 0, f"Could not strip colors from phrase: ({patt})!"
-
-                s = s.replace(patt, colored)
-                pos = 0
-                continue
-
-            pos += 1
-
-        return s
+        return ''.join(stack[0][2])
 
     @staticmethod
     def noColors(s):
@@ -297,17 +300,15 @@ class Logger:
 
     @staticmethod
     def htmlColors(s):
-        def get_col(c, txt):
-            text = escape(txt)
-
+        # Text segments are escaped by replaceColors, so get_col receives safe HTML.
+        def get_col(c, text):
             for k, v in Logger.colors_map.items():
                 if v == c:
-                    htmlCol = Logger.html_colors_map[k]
                     return f'<font class="text-{k}">{text}</font>'
-            
+
             return text
 
-        return Logger.replaceColors(s, get_col)
+        return Logger.replaceColors(s, get_col, escape)
 
     def colored(self, txt, col):
         if self.options['nocolor']:
@@ -4391,11 +4392,16 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
         result = ''
 
         for p in parts:
-            if p.startswith('eyJ'):
+            if p.startswith('eyJ') and len(p) <= MAX_MSFBL_PART_LENGTH:
                 decoded = base64.b64decode(p)
                 if SMTPHeadersAnalysis.printable(decoded):
+                    try:
+                        # Compact output keeps report size linear in the input.
+                        rendered = json.dumps(json.loads(decoded), ensure_ascii=False)
+                    except (ValueError, RecursionError):
+                        continue
                     result += f'\t- Headers contained Feedback Loop object used by marketing systems to offer ISPs way to notify the sender that recipient marked that e-mail as Junk/Spam.\n'
-                    result += '\n' + json.dumps(json.loads(decoded), indent=4) + '\n'
+                    result += '\n' + rendered + '\n'
 
         if len(result) == 0:
             return []
@@ -4768,9 +4774,10 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
         if firstHopDomain1.lower() != senderDomain.lower():
             response = []
             try:
-                if domain.endswith('.'): 
+                if domain.endswith('.'):
                     domain = domain[:-1]
-                response = dns.resolver.resolve(domain, 'TXT')
+                if not options['dont_resolve']:
+                    response = dns.resolver.resolve(domain, 'TXT')
 
             except dns.resolver.NoAnswer as e:
                 response = []
@@ -4983,9 +4990,11 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
         posOfKey = 0
         extrapos = 0
 
+        received = received[:MAX_RECEIVED_LENGTH]
         if not received.lower().strip().startswith('from'):
             received = 'from ' + received
 
+        received_lower = received.lower()
         paren = 0
         while pos < len(received):
             keynow = ''
@@ -5010,7 +5019,7 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
                 if pos == 0: tmp = True
                 else: tmp = (received[pos-1] in string.whitespace)
 
-                if received[pos:].lower().startswith(key + ' ') and tmp:
+                if tmp and received_lower.startswith(key + ' ', pos):
                     if lastkey != '':
                         parsed[lastkey] = received[posOfKey+len(lastkey)+1:pos].strip()
 
@@ -5257,14 +5266,15 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
                 continue
 
             num += 1
+            depth = min(num, MAX_HOP_INDENT_DEPTH)
             s = '-->'
             if i > 0:
                 s = '|_>'
-            
+
             if num == 2 or n1 == -1:
-                result += iindent + indent * (num+1) + f'{s} ({elem["num"]}) {self.logger.colored(elem["host"], "green")}'
+                result += iindent + indent * (depth+1) + f'{s} ({elem["num"]}) {self.logger.colored(elem["host"], "green")}'
             else:
-                result += iindent + indent * (num+1) + f'{s} ({elem["num"]}) {self.logger.colored(elem["host"], "yellow")}'
+                result += iindent + indent * (depth+1) + f'{s} ({elem["num"]}) {self.logger.colored(elem["host"], "yellow")}'
 
             if elem['ip'] != None and len(elem['ip']) > 0:
                 if elem['ip'][0] == '[' and elem['ip'][-1] == ']':
@@ -5283,13 +5293,13 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
 
                 if elem['host2'] != elem['host'] and elem['host2'] != elem['ip']:
                     #result += f' (rev: {self.logger.colored(elem["host2"], "yellow")})'
-                    result += iindent + indent * (num+3) + 'rev-DNS:  ' + self.logger.colored(elem["host2"], "yellow") + '\n'
+                    result += iindent + indent * (depth+3) + 'rev-DNS:  ' + self.logger.colored(elem["host2"], "yellow") + '\n'
 
             if elem['timestamp'] != None:
-                result += iindent + indent * (num+3) + 'time:     ' + elem['timestamp'] + '\n'
+                result += iindent + indent * (depth+3) + 'time:     ' + elem['timestamp'] + '\n'
 
             if len(elem['ver']) > 0:
-                result += iindent + indent * (num+3) + 'id:       ' + elem['ver'] + '\n'
+                result += iindent + indent * (depth+3) + 'id:       ' + elem['ver'] + '\n'
 
             for kk, vv in elem['parsed'].items():
                 vv = str(vv)
@@ -5303,13 +5313,13 @@ Src: https://www.cisco.com/c/en/us/td/docs/security/esa/esa11-1/user_guide/b_ESA
                         continue
 
                     vv = self.colorizeKeywords(vv)
-                    result += iindent + indent * (num+3) + kk + ': ' + ' ' * (n) + vv + '\n'
+                    result += iindent + indent * (depth+3) + kk + ': ' + ' ' * (n) + vv + '\n'
 
             if 'extra' in elem.keys() and len(elem['extra']) > 0:
-                result += iindent + indent * (num+3) + 'extra: \n'
+                result += iindent + indent * (depth+3) + 'extra: \n'
                 for vv in elem['extra']:
                     vv0 = self.colorizeKeywords(vv)
-                    result += iindent + indent * (num+4) + '- ' + vv0 + '\n'
+                    result += iindent + indent * (depth+4) + '- ' + vv0 + '\n'
 
             result += '\n'
 
@@ -6444,7 +6454,9 @@ This can lead to an internal information disclosure. This test shows potential h
 
     def testResolveIntoIP(self):
         #domains = set(re.findall(r'([a-z0-9_\-\.]+\.[a-zA-Z]{2,})', self.text, re.I))
-        domains = set(re.findall(r'((?:[\w.-]+\.)+[\w]{2,})', self.text, re.I))
+        # Labels cannot consume their separators and matches start only at token
+        # boundaries, so extraction stays linear on hostile input.
+        domains = set(re.findall(r'(?<![\w.-])((?:[\w-]+\.)+\w{2,})', self.text, re.I))
         resolved = set()
         result = ''
         tmp = ''
@@ -6645,8 +6657,10 @@ def formatToHtml(body, headers):
     testStart = '>>>>>>>>>>>>>>>>>>>>>>'
     testEnd   = '<<<<<<<<<<<<<<<<<<<<<<'
 
-    body = body.replace(testStart, '<div><hr/>')
-    body = body.replace(testEnd,   '</div>')
+    for marker, html in ((testStart, '<div><hr/>'), (testEnd, '</div>')):
+        body = body.replace(escape(marker), html).replace(marker, html)
+
+    headers = escape(headers)
 
     body = body.replace('\n', '<br/>\n').replace('\t', '\t' + '&nbsp;' * 4).replace(' ', '&nbsp;')
     headers = headers.replace('\n', '<br/>\n').replace('\t', '\t' + '&nbsp;' * 4).replace(' ', '&nbsp;')

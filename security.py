@@ -288,3 +288,52 @@ def totp_matched_step(totp, code: str | None, for_time: datetime.datetime, valid
         if hmac.compare_digest(str(code), totp.generate_otp(step)):
             return step
     return None
+
+
+REDACTED_EMAIL = "***"
+
+
+def mask_email(address: str | None) -> str | None:
+    """Mask an address for public display, redacting anything unparseable."""
+    if not address:
+        return address
+    # The domain can never contain "@", so the last one splits even quoted local parts.
+    user, sep, domain = address.rpartition("@")
+    labels = domain.split(".")
+    if not sep or not user or not all(labels):
+        return REDACTED_EMAIL
+    masked_user = user[0] + "***" + user[-1] if len(user) > 2 else user[0] + "***"
+    masked_domain = labels[0][0] + "***"
+    if len(labels) > 1:
+        masked_domain += "." + labels[-1]
+    return f"{masked_user}@{masked_domain}"
+
+
+_LOG_UNSAFE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def _escape_log_char(match: re.Match) -> str:
+    code = ord(match.group())
+    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+
+
+def log_safe(value, limit: int = 200) -> str:
+    """Render untrusted text on one log line, escaping control characters."""
+    text = str(value)
+    if len(text) > limit:
+        text = text[:limit] + "..."
+    return _LOG_UNSAFE.sub(_escape_log_char, text)
+
+
+def probe_receipt_token(secret_key: str, guid: str) -> str:
+    """Private proof that a returned probe is the one MailDT sent.
+
+    The GUID is a public display identifier; this token travels only in the
+    outbound probe and is never returned by the monitoring APIs.
+    """
+    material = f"maildt-probe-receipt\0{guid}".encode()
+    return hmac.new(secret_key.encode(), material, hashlib.sha256).hexdigest()[:32]
+
+
+def valid_probe_receipt(secret_key: str, guid: str, token: str | None) -> bool:
+    return bool(token) and hmac.compare_digest(probe_receipt_token(secret_key, guid), token)
