@@ -372,8 +372,10 @@ def test_received_parsing_is_bounded_on_long_headers():
 
 def test_received_parsing_still_extracts_keys():
     parsed = analysis().parseReceived('from mail.example.com (1.2.3.4) by mx.example.net with ESMTPS id abc', 1)
-    assert 'mail.example.com' in str(parsed)
-    assert 'mx.example.net' in str(parsed)
+    assert parsed['host'] == 'mail.example.com'
+    assert parsed['ip'] == '1.2.3.4'
+    assert parsed['parsed']['by'] == 'mx.example.net'
+    assert parsed['parsed']['with'] == 'ESMTPS'
 
 
 def test_domain_extraction_is_linear_on_hostile_input(monkeypatch):
