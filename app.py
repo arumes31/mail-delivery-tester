@@ -13,11 +13,13 @@ import ssl
 import subprocess  # nosec
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from email.header import decode_header
 from email.mime.text import MIMEText
 from functools import wraps
+from html import escape as html_escape
 from urllib.parse import quote_plus
 
 import dns.exception
@@ -36,7 +38,7 @@ from flask import (
     url_for,
 )
 from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, create_engine, desc
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
 
 from security import (
@@ -44,9 +46,12 @@ from security import (
     SMTPDestinationError,
     TrustedProxyMiddleware,
     detect_image_type,
+    log_safe,
+    mask_email,
     parse_allowed_hosts,
     parse_allowed_ports,
     parse_cidrs,
+    probe_receipt_token,
     read_optional_secret,
     read_secret,
     resolve_smtp_destination,
@@ -55,6 +60,7 @@ from security import (
     safe_widget_url,
     session_version,
     totp_matched_step,
+    valid_probe_receipt,
 )
 from spam_decoder import decode_spam_headers
 
@@ -112,6 +118,9 @@ CONFIG = {
     'IMAP_PORT': get_env_var('IMAP_PORT', 993, int),
     'IMAP_USER': get_env_var('IMAP_USER'),
     'IMAP_PASS': read_optional_secret('IMAP_PASS'),
+    # Optional PEM bundle for mail servers signed by a private CA. Certificates
+    # and hostnames are verified either way.
+    'MAIL_TLS_CA_FILE': get_env_var('MAIL_TLS_CA_FILE'),
     'SEND_INTERVAL': get_env_var('SEND_INTERVAL', 3600, int),
     'CHECK_INTERVAL': get_env_var('CHECK_INTERVAL', 30, int),
     'ALERT_THRESHOLD': get_env_var('ALERT_THRESHOLD', 900, int),
@@ -455,6 +464,28 @@ def increment_counter(name, session_provided=None):
 
 # --- Mail Logic ---
 
+def mail_tls_context():
+    """Verifying TLS context for every credential-bearing mail connection."""
+    context = ssl.create_default_context(cafile=CONFIG['MAIL_TLS_CA_FILE'] or None)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+def connect_smtp(timeout=30):
+    """Open an SMTP connection to the configured server over verified TLS."""
+    if CONFIG['SMTP_PORT'] == 465:
+        return smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=timeout, context=mail_tls_context())
+    server = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=timeout)
+    try:
+        server.starttls(context=mail_tls_context())
+    except Exception:
+        server.close()
+        raise
+    return server
+
+def connect_imap(timeout=30):
+    """Open an IMAP connection to the configured server over verified TLS."""
+    return imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'], ssl_context=mail_tls_context(), timeout=timeout)
+
 def send_probe_email():
     """Generates a GUID and sends a probe email to recipients due for a check."""
     if not CONFIG['SMTP_HOST']:
@@ -474,19 +505,15 @@ def send_probe_email():
             logger.info("No recipients due for probe sending.")
             return # Nothing to do
 
-        # Choose connection type based on port
-        if CONFIG['SMTP_PORT'] == 465:
-            server = smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'])
-        else:
-            server = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'])
-            server.starttls()
+        server = connect_smtp()
 
         with server:
             server.login(CONFIG['SMTP_USER'], CONFIG['SMTP_PASS'])
-            
+
             for recipient in recipients:
                 probe_guid = str(uuid.uuid4())
-                subject = f"MAILDT-PROBE: {probe_guid}"
+                # The GUID is public (dashboard APIs); the receipt token is not.
+                subject = f"MAILDT-PROBE: {probe_guid} {probe_receipt_token(secret_key, probe_guid)}"
                 
                 html_body = f"""
                 <!DOCTYPE html>
@@ -693,16 +720,254 @@ STATS_CACHE = {
     'timestamp': None
 }
 
+MAIL_TEST_ID_RE = re.compile(r'[A-Za-z0-9_-]{16,50}')
+
+def decode_subject(msg):
+    """Decode a Subject header without letting its declared charset raise."""
+    parts = []
+    for value, charset in decode_header(msg.get("Subject", "")):
+        if isinstance(value, bytes):
+            try:
+                value = value.decode(charset or "utf-8", errors="replace")
+            except LookupError:
+                value = value.decode("utf-8", errors="replace")
+        parts.append(value)
+    return "".join(parts)
+
+def subject_tokens(subject, prefix):
+    """Whitespace-separated tokens that follow PREFIX in SUBJECT."""
+    return subject.split(prefix, 1)[1].split()
+
+def process_probe_message(session, msg, subject, rec_map):
+    """Record a returned probe. Returns True when the message is finished."""
+    tokens = subject_tokens(subject, "MAILDT-PROBE:")
+    if not tokens:
+        return True
+    guid = tokens[0]
+    token = tokens[1] if len(tokens) > 1 else None
+    # GUIDs are shown on the public dashboard, so only the private receipt token
+    # proves that this message is the probe we sent through the monitored path.
+    if not valid_probe_receipt(secret_key, guid, token):
+        logger.warning("IMAP: Ignoring probe %s without a valid receipt token.", log_safe(guid, 64))
+        return True
+
+    probe = session.query(EmailProbe).filter_by(guid=guid).first()
+    if not probe:
+        logger.warning("IMAP: Received probe with GUID %s but it's not in our database.", log_safe(guid, 64))
+        return True
+    if probe.received_at:
+        logger.info("Probe %s already marked as received.", probe.guid)
+        return True
+
+    probe.received_at = utc_now()
+    # Use cached recipient lookup
+    recipient = rec_map.get(probe.recipient_email)
+    if recipient and recipient.alert_active:
+        msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
+        if recipient.discord_alerts_enabled:
+            send_discord_alert(msg_rec)
+        if recipient.email_alerts_enabled:
+            send_email_alert(msg_rec)
+        if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
+            send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed", event_type="Recovery", probe_guid=probe.guid, metadata={"latency_seconds": probe.latency})
+        recipient.alert_active = False
+
+    auth_headers = []
+    for header_name in ["Authentication-Results", "Authentication-Results-Original", "Received-SPF", "X-Forefront-Antispam-Report"]:
+        values = msg.get_all(header_name)
+        if values:
+            for v in values:
+                auth_headers.append(f"{header_name.lower()}: {str(v).lower()}")
+
+    combined_auth = " ".join(auth_headers)
+
+    # Parse SPF
+    if re.search(r'\bspf=pass\b', combined_auth) or re.search(r'received-spf:\s*pass', combined_auth):
+        probe.spf_status = "pass"
+    elif re.search(r'\bspf=(fail|softfail|temperror|permerror)\b', combined_auth) or re.search(r'received-spf:\s*(fail|softfail)', combined_auth):
+        probe.spf_status = "fail"
+    else:
+        probe.spf_status = "unknown"
+
+    # Parse DKIM
+    if re.search(r'\bdkim=pass\b', combined_auth):
+        probe.dkim_status = "pass"
+    elif re.search(r'\bdkim=(fail|temperror|permerror)\b', combined_auth):
+        probe.dkim_status = "fail"
+    else:
+        probe.dkim_status = "unknown"
+
+    # Parse DMARC
+    if re.search(r'\bdmarc=pass\b', combined_auth) or re.search(r'\bdmarc=bestguesspass\b', combined_auth):
+        probe.dmarc_status = "pass"
+    elif re.search(r'\bdmarc=(fail|temperror|permerror)\b', combined_auth):
+        probe.dmarc_status = "fail"
+    else:
+        probe.dmarc_status = "unknown"
+
+    # Log empty or unknown for debugging
+    if "unknown" in [probe.spf_status, probe.dkim_status, probe.dmarc_status]:
+        logger.info(
+            "[DEBUG] Auth results incomplete for %s. SPF: %s, DKIM: %s, DMARC: %s. Headers found: %s",
+            probe.guid, probe.spf_status, probe.dkim_status, probe.dmarc_status, log_safe(combined_auth, 500),
+        )
+
+    # Increment failure counters
+    if probe.spf_status == 'fail':
+        increment_counter('spf_fail', session_provided=session)
+    if probe.dkim_status == 'fail':
+        increment_counter('dkim_fail', session_provided=session)
+    if probe.dmarc_status == 'fail':
+        increment_counter('dmarc_fail', session_provided=session)
+
+    # Trigger Alerts for Auth Failures & Unknowns
+    auth_issues = []
+    if probe.spf_status in ['fail', 'unknown']:
+        auth_issues.append(f"SPF: {probe.spf_status}")
+    if probe.dkim_status in ['fail', 'unknown']:
+        auth_issues.append(f"DKIM: {probe.dkim_status}")
+    if probe.dmarc_status in ['fail', 'unknown']:
+        auth_issues.append(f"DMARC: {probe.dmarc_status}")
+
+    if auth_issues and recipient:
+        issue_summary = ", ".join(auth_issues)
+        err_msg = f"⚠️ **Mail Authentication Alert**\nProbe `{probe.guid}` to `{probe.recipient_email}` returned with auth issues.\n**{issue_summary}**\nHeaders: \n```{combined_auth[:1000]}```"
+
+        if recipient.discord_alerts_enabled:
+            send_discord_alert(err_msg)
+        if recipient.email_alerts_enabled:
+            send_email_alert(err_msg)
+        if recipient.webhook_alerts_enabled:
+            url = CONFIG['WEBHOOK_URL'] or recipient.webhook_url
+            if url:
+                send_webhook_alert(url, "Mail Authentication Alert", err_msg, recipient.email, status="Warning", event_type="AuthFailure", probe_guid=probe.guid, metadata={"spf": probe.spf_status, "dkim": probe.dkim_status, "dmarc": probe.dmarc_status})
+
+    probe.status = 'RECEIVED'
+    increment_counter('mail_received', session_provided=session)
+    session.commit()
+    logger.info("Received probe %s.", probe.guid)
+    return True
+
+def process_test_message(session, msg, subject):
+    """Store a mail-tester result. Returns True when the message is finished."""
+    tokens = subject_tokens(subject, "MAILDT-TEST:")
+    test_id = tokens[0] if tokens else ''
+    # Only store results for tests a visitor actually started, once each.
+    if not MAIL_TEST_ID_RE.fullmatch(test_id) or not session.get(ActiveTestSignal, test_id):
+        logger.warning("IMAP: Ignoring mail test %s that is not active.", log_safe(test_id, 64))
+        return True
+    if session.query(MailTest).filter_by(test_id=test_id).first():
+        logger.info("Mail test %s already recorded.", test_id)
+        return True
+
+    # Extract headers and body
+    headers_str = ""
+    for k, v in msg.items():
+        headers_str += f"{k}: {v}\n"
+
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                body = (part.get_payload(decode=True) or b"").decode(errors='replace')
+                break
+    else:
+        body = (msg.get_payload(decode=True) or b"").decode(errors='replace')
+
+    # Basic Auth Results from headers
+    auth_results = str(msg.get("Authentication-Results", "")).lower()
+    spf = "unknown"
+    if "spf=pass" in auth_results:
+        spf = "pass"
+    elif "spf=fail" in auth_results:
+        spf = "fail"
+
+    dkim = "unknown"
+    if "dkim=pass" in auth_results:
+        dkim = "pass"
+    elif "dkim=fail" in auth_results:
+        dkim = "fail"
+
+    dmarc = "unknown"
+    if "dmarc=pass" in auth_results:
+        dmarc = "pass"
+    elif "dmarc=fail" in auth_results:
+        dmarc = "fail"
+
+    # Decode Spam Headers
+    headers_dict = {k: v for k, v in msg.items()}
+    spam_report = json.dumps(decode_spam_headers(headers_dict))
+
+    # Save test result, truncated to the column sizes so a long header cannot
+    # make the insert fail on every poll.
+    session.add(MailTest(
+        test_id=test_id,
+        subject=subject[:255],
+        sender=str(msg.get("From", ""))[:120],
+        body=body,
+        headers=headers_str,
+        spf_status=spf,
+        dkim_status=dkim,
+        dmarc_status=dmarc,
+        spam_report=spam_report
+    ))
+    session.commit()
+    logger.info("Received mail test %s", test_id)
+    return True
+
+def process_inbox_message(mail, session, e_id, rec_map):
+    """Handle one message inside its own failure boundary.
+
+    Messages that are processed, or that can never succeed (malformed,
+    unknown, forged), are flagged for deletion so they cannot block later
+    polls. Database failures are rolled back and the message is kept for retry
+    without poisoning the session for the rest of the batch.
+    """
+    done = False
+    try:
+        res, msg_data = mail.fetch(e_id, "(RFC822)")
+        if res != "OK":
+            logger.warning("IMAP: Fetch failed for message %s", log_safe(e_id, 32))
+            return
+        for response_part in msg_data:
+            if not isinstance(response_part, tuple):
+                continue
+            msg = email.message_from_bytes(response_part[1])
+            subject = decode_subject(msg)
+            logger.info("IMAP: Processing email with subject: %s", log_safe(subject))
+
+            if "MAILDT-PROBE:" in subject:
+                done = process_probe_message(session, msg, subject, rec_map)
+            elif "MAILDT-TEST:" in subject:
+                done = process_test_message(session, msg, subject)
+            else:
+                done = True
+    except SQLAlchemyError as db_err:
+        session.rollback()
+        logger.error("IMAP: Database error for message %s (%s); will retry", log_safe(e_id, 32), type(db_err).__name__)
+        return
+    except Exception as parse_err:
+        session.rollback()
+        logger.error("IMAP: Discarding unprocessable message %s (%s)", log_safe(e_id, 32), type(parse_err).__name__)
+        done = True
+
+    if done:
+        try:
+            mail.store(e_id, '+FLAGS', r'\Deleted')
+        except imaplib.IMAP4.error as store_err:
+            logger.warning("IMAP: Could not flag message %s (%s)", log_safe(e_id, 32), type(store_err).__name__)
+
 def check_inbox():
     """Checks IMAP for returned probe emails and active tests."""
     global LAST_IMAP_CHECK
-    
+
     if not CONFIG['IMAP_HOST']:
         logger.warning("IMAP not configured. Skipping check.")
         return
 
     now = utc_now()
     session = Session()
+    mail = None
     try:
         # Cleanup expired signals (older than 10 mins)
         cutoff = now - datetime.timedelta(minutes=10)
@@ -712,201 +977,40 @@ def check_inbox():
         # No more internal throttling here, rely on scheduler interval
         LAST_IMAP_CHECK = now
 
-        mail = imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'])
+        mail = connect_imap()
         mail.login(CONFIG['IMAP_USER'], CONFIG['IMAP_PASS'])
         mail.select("INBOX") # Use uppercase INBOX for better compatibility
 
         # Search for emails with our subject prefix
         # We search for both PROBE and TEST
         status, messages = mail.search(None, '(OR (SUBJECT "MAILDT-PROBE:") (SUBJECT "MAILDT-TEST:"))')
-        
+
         if status != "OK":
-            logger.warning(f"IMAP search failed: {status}")
+            logger.warning("IMAP search failed: %s", log_safe(status, 32))
             return
 
         email_ids = messages[0].split()
+        rec_map = {}
         if email_ids:
             logger.info(f"IMAP: Found {len(email_ids)} potential probe/test emails.")
             # Pre-cache recipients for faster lookup
-            all_recipients = session.query(Recipient).all()
-            rec_map = {r.email: r for r in all_recipients}
-        
+            rec_map = {r.email: r for r in session.query(Recipient).all()}
+
         for e_id in email_ids:
-            # Fetch the email
-            res, msg_data = mail.fetch(e_id, "(RFC822)")
-            for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    msg = email.message_from_bytes(response_part[1])
-                    subject, encoding = decode_header(msg["Subject"])[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding if encoding else "utf-8")
-                    
-                    logger.info(f"IMAP: Processing email with subject: {subject}")
-                    
-                    if "MAILDT-PROBE:" in subject:
-                        try:
-                            parts = subject.split("MAILDT-PROBE:")
-                            if len(parts) > 1:
-                                guid = parts[1].strip()
-                                # Find in DB
-                                probe = session.query(EmailProbe).filter_by(guid=guid).first()
-                                if probe:
-                                    if not probe.received_at:
-                                        probe.received_at = utc_now()
-                                        # Use cached recipient lookup
-                                        recipient = rec_map.get(probe.recipient_email)
-                                        if recipient and recipient.alert_active:
-                                            msg_rec = f"✅ **Mail Delivery Recovered**\nProbe `{probe.guid}` to `{probe.recipient_email}` has arrived.\nLatency: {probe.latency:.2f}s"
-                                            if recipient.discord_alerts_enabled: send_discord_alert(msg_rec)
-                                            if recipient.email_alerts_enabled: send_email_alert(msg_rec)
-                                            if recipient.webhook_alerts_enabled and CONFIG['WEBHOOK_URL']:
-                                                send_webhook_alert(CONFIG['WEBHOOK_URL'], "Mail Delivery Check Recovered", msg_rec, recipient.email, status="Closed", event_type="Recovery", probe_guid=probe.guid, metadata={"latency_seconds": probe.latency})
-                                            recipient.alert_active = False
+            process_inbox_message(mail, session, e_id, rec_map)
 
-                                        auth_headers = []
-                                        for header_name in ["Authentication-Results", "Authentication-Results-Original", "Received-SPF", "X-Forefront-Antispam-Report"]:
-                                            values = msg.get_all(header_name)
-                                            if values:
-                                                for v in values:
-                                                    auth_headers.append(f"{header_name.lower()}: {str(v).lower()}")
-                                                    
-                                        combined_auth = " ".join(auth_headers)
-                                        
-                                        # Parse SPF
-                                        if re.search(r'\bspf=pass\b', combined_auth) or re.search(r'received-spf:\s*pass', combined_auth):
-                                            probe.spf_status = "pass"
-                                        elif re.search(r'\bspf=(fail|softfail|temperror|permerror)\b', combined_auth) or re.search(r'received-spf:\s*(fail|softfail)', combined_auth):
-                                            probe.spf_status = "fail"
-                                        else:
-                                            probe.spf_status = "unknown"
-
-                                        # Parse DKIM
-                                        if re.search(r'\bdkim=pass\b', combined_auth):
-                                            probe.dkim_status = "pass"
-                                        elif re.search(r'\bdkim=(fail|temperror|permerror)\b', combined_auth):
-                                            probe.dkim_status = "fail"
-                                        else:
-                                            probe.dkim_status = "unknown"
-
-                                        # Parse DMARC
-                                        if re.search(r'\bdmarc=pass\b', combined_auth) or re.search(r'\bdmarc=bestguesspass\b', combined_auth):
-                                            probe.dmarc_status = "pass"
-                                        elif re.search(r'\bdmarc=(fail|temperror|permerror)\b', combined_auth):
-                                            probe.dmarc_status = "fail"
-                                        else:
-                                            probe.dmarc_status = "unknown"
-
-                                        # Log empty or unknown for debugging
-                                        if "unknown" in [probe.spf_status, probe.dkim_status, probe.dmarc_status]:
-                                            logger.info(f"[DEBUG] Auth results incomplete for {probe.guid}. SPF: {probe.spf_status}, DKIM: {probe.dkim_status}, DMARC: {probe.dmarc_status}. Headers found: {combined_auth[:500]}")
-
-                                        # Increment failure counters
-                                        if probe.spf_status == 'fail':
-                                            increment_counter('spf_fail', session_provided=session)
-                                        if probe.dkim_status == 'fail':
-                                            increment_counter('dkim_fail', session_provided=session)
-                                        if probe.dmarc_status == 'fail':
-                                            increment_counter('dmarc_fail', session_provided=session)
-
-                                        # Trigger Alerts for Auth Failures & Unknowns
-                                        auth_issues = []
-                                        if probe.spf_status in ['fail', 'unknown']:
-                                            auth_issues.append(f"SPF: {probe.spf_status}")
-                                        if probe.dkim_status in ['fail', 'unknown']:
-                                            auth_issues.append(f"DKIM: {probe.dkim_status}")
-                                        if probe.dmarc_status in ['fail', 'unknown']:
-                                            auth_issues.append(f"DMARC: {probe.dmarc_status}")
-
-                                        if auth_issues and recipient:
-                                            issue_summary = ", ".join(auth_issues)
-                                            err_msg = f"⚠️ **Mail Authentication Alert**\nProbe `{probe.guid}` to `{probe.recipient_email}` returned with auth issues.\n**{issue_summary}**\nHeaders: \n```{combined_auth[:1000]}```"
-                                            
-                                            if recipient.discord_alerts_enabled:
-                                                send_discord_alert(err_msg)
-                                            if recipient.email_alerts_enabled:
-                                                send_email_alert(err_msg)
-                                            if recipient.webhook_alerts_enabled:
-                                                url = CONFIG['WEBHOOK_URL'] or recipient.webhook_url
-                                                if url:
-                                                    send_webhook_alert(url, "Mail Authentication Alert", err_msg, recipient.email, status="Warning", event_type="AuthFailure", probe_guid=probe.guid, metadata={"spf": probe.spf_status, "dkim": probe.dkim_status, "dmarc": probe.dmarc_status})
-
-                                        probe.status = 'RECEIVED'
-                                        increment_counter('mail_received', session_provided=session)
-                                        session.commit()
-                                        logger.info(f"Received probe {guid}.")
-                                    else:
-                                        logger.info(f"Probe {guid} already marked as received.")
-                                else:
-                                    logger.warning(f"IMAP: Received probe with GUID {guid} but it's not in our database.")
-                                mail.store(e_id, '+FLAGS', r'\Deleted')
-                        except Exception as parse_err:
-                            logger.error(f"Error processing probe email: {parse_err}")
-
-                    elif "MAILDT-TEST:" in subject:
-                        try:
-                            parts = subject.split("MAILDT-TEST:")
-                            if len(parts) > 1:
-                                test_id = parts[1].strip()
-                                
-                                # Extract headers and body
-                                headers_str = ""
-                                for k, v in msg.items():
-                                    headers_str += f"{k}: {v}\n"
-                                
-                                body = ""
-                                if msg.is_multipart():
-                                    for part in msg.walk():
-                                        if part.get_content_type() == "text/plain":
-                                            body = part.get_payload(decode=True).decode(errors='replace')
-                                            break
-                                else:
-                                    body = msg.get_payload(decode=True).decode(errors='replace')
-
-                                # Basic Auth Results from headers
-                                auth_results = msg.get("Authentication-Results", "")
-                                spf = "unknown"
-                                if "spf=pass" in auth_results.lower(): spf = "pass"
-                                elif "spf=fail" in auth_results.lower(): spf = "fail"
-                                
-                                dkim = "unknown"
-                                if "dkim=pass" in auth_results.lower(): dkim = "pass"
-                                elif "dkim=fail" in auth_results.lower(): dkim = "fail"
-
-                                dmarc = "unknown"
-                                if "dmarc=pass" in auth_results.lower(): dmarc = "pass"
-                                elif "dmarc=fail" in auth_results.lower(): dmarc = "fail"
-
-                                # Decode Spam Headers
-                                headers_dict = {k: v for k, v in msg.items()}
-                                spam_report = json.dumps(decode_spam_headers(headers_dict))
-
-                                # Save test result
-                                new_test = MailTest(
-                                    test_id=test_id,
-                                    subject=subject,
-                                    sender=msg.get("From"),
-                                    body=body,
-                                    headers=headers_str,
-                                    spf_status=spf,
-                                    dkim_status=dkim,
-                                    dmarc_status=dmarc,
-                                    spam_report=spam_report
-                                )
-                                session.add(new_test)
-                                session.commit()
-                                logger.info(f"Received mail test {test_id}")
-                                
-                                mail.store(e_id, '+FLAGS', r'\Deleted')
-                        except Exception as test_err:
-                            logger.error(f"Error processing test email: {test_err}")
-            
         mail.expunge()
         mail.close()
-        mail.logout()
 
     except Exception as e:
+        session.rollback()
         logger.error("Inbox check failed (%s)", type(e).__name__)
     finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception as logout_err:
+                logger.debug("IMAP logout failed (%s)", type(logout_err).__name__)
         session.close()
 
 def send_discord_alert(message):
@@ -924,8 +1028,9 @@ def send_email_alert(message):
         return
 
     try:
-        # Prepare message for HTML
-        html_message = message.replace('\n', '<br>')
+        # Alert text can carry headers from received mail; escape it before
+        # adding trusted line-break markup.
+        html_message = html_escape(message).replace('\n', '<br>')
         
         # Create HTML email for alert
         html_body = f"""
@@ -967,14 +1072,7 @@ def send_email_alert(message):
         msg['From'] = CONFIG['SMTP_USER']
         msg['To'] = CONFIG['ALERT_MAIL_RECIPIENT']
 
-        # Choose connection type based on port
-        if CONFIG['SMTP_PORT'] == 465:
-            server = smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'])
-        else:
-            server = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'])
-            server.starttls()
-
-        with server:
+        with connect_smtp() as server:
             server.login(CONFIG['SMTP_USER'], CONFIG['SMTP_PASS'])
             server.sendmail(CONFIG['SMTP_USER'], [CONFIG['ALERT_MAIL_RECIPIENT']], msg.as_string())
         
@@ -1367,13 +1465,7 @@ def api_diagnostics_run():
     try:
         if CONFIG['SMTP_HOST']:
             results['smtp']['details'].append(f"Connecting to {CONFIG['SMTP_HOST']}:{CONFIG['SMTP_PORT']}...")
-            if CONFIG['SMTP_PORT'] == 465:
-                s = smtplib.SMTP_SSL(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=20)
-            else:
-                s = smtplib.SMTP(CONFIG['SMTP_HOST'], CONFIG['SMTP_PORT'], timeout=20)
-                s.starttls()
-            
-            with s:
+            with connect_smtp(timeout=20) as s:
                 code, resp = s.ehlo()
                 results['smtp']['details'].append(f"EHLO Response: {code}")
                 
@@ -1389,6 +1481,10 @@ def api_diagnostics_run():
         else:
             results['smtp']['status'] = 'skipped'
             results['smtp']['details'].append("SMTP Host not configured")
+    except ssl.SSLCertVerificationError:
+        logger.warning("SMTP certificate verification failed")
+        results['smtp']['status'] = 'danger'
+        results['smtp']['details'].append("TLS certificate verification failed (set MAIL_TLS_CA_FILE for a private CA)")
     except Exception as e:
         logger.warning("SMTP connection check failed (%s)", type(e).__name__)
         results['smtp']['status'] = 'danger'
@@ -1398,8 +1494,7 @@ def api_diagnostics_run():
     try:
         if CONFIG['IMAP_HOST']:
             results['imap']['details'].append(f"Connecting to {CONFIG['IMAP_HOST']}:{CONFIG['IMAP_PORT']}...")
-            m = imaplib.IMAP4_SSL(CONFIG['IMAP_HOST'], CONFIG['IMAP_PORT'])
-            with m:
+            with connect_imap(timeout=20) as m:
                 results['imap']['details'].append(f"Capabilities: {m.capabilities}")
                 try:
                     m.login(CONFIG['IMAP_USER'], CONFIG['IMAP_PASS'])
@@ -1412,6 +1507,10 @@ def api_diagnostics_run():
         else:
             results['imap']['status'] = 'skipped'
             results['imap']['details'].append("IMAP Host not configured")
+    except ssl.SSLCertVerificationError:
+        logger.warning("IMAP certificate verification failed")
+        results['imap']['status'] = 'danger'
+        results['imap']['details'].append("TLS certificate verification failed (set MAIL_TLS_CA_FILE for a private CA)")
     except Exception as e:
         logger.warning("IMAP connection check failed (%s)", type(e).__name__)
         results['imap']['status'] = 'danger'
@@ -1487,6 +1586,56 @@ def smtp_test_page():
 def blacklist_check_page():
     return render_template('blacklist_check.html')
 
+# Bounds for one decoder run, on top of the request size limit and rate limit.
+DECODER_TIMEOUT = 30
+DECODER_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+DECODER_MAX_HEADER_CHARS = 256 * 1024
+DECODER_MAX_RECEIVED_HOPS = 100
+RECEIVED_HEADER_RE = re.compile(r'^received:', re.I | re.M)
+
+class DecoderOutputTooLarge(Exception):
+    pass
+
+def run_decoder(cmd, timeout=DECODER_TIMEOUT, max_bytes=DECODER_MAX_OUTPUT_BYTES):
+    """Run the decoder, reading at most MAX_BYTES from each output stream."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # nosec
+    captured = {}
+    exceeded = threading.Event()
+
+    def pump(name, stream):
+        buf = bytearray()
+        while chunk := stream.read1(65536):
+            if len(buf) + len(chunk) > max_bytes:
+                exceeded.set()
+                proc.kill()
+                break
+            buf += chunk
+        captured[name] = bytes(buf)
+
+    pumps = [threading.Thread(target=pump, args=(name, stream), daemon=True)
+             for name, stream in (('stdout', proc.stdout), ('stderr', proc.stderr))]
+    for t in pumps:
+        t.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        for t in pumps:
+            t.join(timeout=5)
+        proc.stdout.close()
+        proc.stderr.close()
+
+    if exceeded.is_set():
+        raise DecoderOutputTooLarge()
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode,
+        stdout=captured.get('stdout', b'').decode('utf-8', errors='replace'),
+        stderr=captured.get('stderr', b'').decode('utf-8', errors='replace'),
+    )
+
 @app.route('/decode-spam')
 def decode_spam_page():
     return render_template('decode_spam.html')
@@ -1502,16 +1651,24 @@ def api_decode_spam():
             'retry_after': retry_after
         }), 429
 
-    raw_headers = request.json.get('headers', '').strip()
-    if not raw_headers:
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    raw_headers = payload.get('headers', '')
+    if not isinstance(raw_headers, str) or not raw_headers.strip():
         return jsonify({'error': 'No headers provided'}), 400
+    raw_headers = raw_headers.strip()
+    if len(raw_headers) > DECODER_MAX_HEADER_CHARS:
+        return jsonify({'error': f'Headers are too large (limit {DECODER_MAX_HEADER_CHARS // 1024} KiB)'}), 413
+    if len(RECEIVED_HEADER_RE.findall(raw_headers)) > DECODER_MAX_RECEIVED_HOPS:
+        return jsonify({'error': f'Too many Received headers (limit {DECODER_MAX_RECEIVED_HOPS})'}), 400
 
     # Record usage
     record_usage('decode-spam')
 
     tmp_path = None
     try:
-        legacy = request.json.get('legacy', False)
+        legacy = payload.get('legacy') is True
 
         # 1. Create a temporary file for the headers
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp:
@@ -1521,20 +1678,13 @@ def api_decode_spam():
         # 2. Run the decoder. Only authenticated users may make the server perform
         # DNS and IP-geolocation lookups for addresses found in the pasted headers.
         resolve_flag = '-r' if is_authenticated() else '-R'
+        # Both modes go through the wrapper, which applies the memory and output
+        # budgets; legacy mode keeps the official script's ANSI text output.
         if legacy:
-            # Run the official script directly, forcing TTY to preserve colors (colorama strips them otherwise)
-            cmd = [
-                sys.executable, '-c',
-                "import sys; sys.stdout.isatty = lambda: True; "
-                "import decode_spam_headers_official; "
-                "decode_spam_headers_official.main(sys.argv[1:])",
-                resolve_flag, tmp_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
+            cmd = [sys.executable, 'decode_wrapper.py', '--legacy', resolve_flag, tmp_path]
         else:
-            # Run via wrapper for modern JSON output with bug fixes
             cmd = [sys.executable, 'decode_wrapper.py', '-f', 'json', resolve_flag, tmp_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec
+        result = run_decoder(cmd)
         
         if result.returncode != 0:
             # Keep tracebacks and paths server-side; callers only get a generic error.
@@ -1565,7 +1715,9 @@ def api_decode_spam():
             return jsonify({'error': 'Failed to parse decoder output as JSON'}), 500
 
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Decoding timed out (30s)'}), 504
+        return jsonify({'error': f'Decoding timed out ({DECODER_TIMEOUT}s)'}), 504
+    except DecoderOutputTooLarge:
+        return jsonify({'error': 'Decoder report exceeded the size limit'}), 413
     except Exception as e:
         logger.error("Decoder failed (%s)", type(e).__name__)
         return jsonify({'error': 'Decoder failed'}), 500
@@ -1584,6 +1736,12 @@ def web_check_page():
     if not CONFIG['ENABLE_WEBCHECK']:
         return redirect(url_for('index'))
     return render_template('web_check.html', webcheck_url=CONFIG['WEBCHECK_URL'])
+
+# One public blacklist request may check the target plus a few MX addresses,
+# all within a single wall-clock budget.
+BLACKLIST_MAX_MX_HOSTS = 5
+BLACKLIST_MAX_MX_ADDRESSES = 3
+BLACKLIST_DEADLINE = 25
 
 @app.route('/api/diagnostics/blacklist')
 def api_blacklist_check():
@@ -1615,7 +1773,11 @@ def api_blacklist_check():
                 mx_resolver = dns.resolver.Resolver()
                 mx_resolver.nameservers = ['8.8.8.8', '8.8.4.4']
                 mx_answers = mx_resolver.resolve(target, 'MX')
-                for mx in mx_answers:
+                # The domain owner controls its MX set, so bound the work it can cause.
+                preferred = sorted(mx_answers, key=lambda mx: mx.preference)[:BLACKLIST_MAX_MX_HOSTS]
+                for mx in preferred:
+                    if len(mx_ips) >= BLACKLIST_MAX_MX_ADDRESSES:
+                        break
                     mx_host = str(mx.exchange).rstrip('.')
                     try:
                         mx_ip = socket.gethostbyname(mx_host)
@@ -1660,15 +1822,20 @@ def api_blacklist_check():
         "dnsbl.kjsl.com"
     ]
 
+    deadline = time.monotonic() + BLACKLIST_DEADLINE
+    resolver = dns.resolver.Resolver()
+
     def check_ip(ip_addr):
         ip_results = []
         reversed_ip = ".".join(ip_addr.split(".")[::-1])
         for bl in dnsbls:
+            budget = deadline - time.monotonic()
+            if budget <= 0:
+                ip_results.append({'dnsbl': bl, 'status': 'error', 'details': 'Skipped: time budget exceeded'})
+                continue
             query = f"{reversed_ip}.{bl}"
             try:
-                resolver = dns.resolver.Resolver()
-                resolver.timeout = 1.5
-                resolver.lifetime = 1.5
+                resolver.timeout = resolver.lifetime = min(1.5, budget)
                 answers = resolver.resolve(query, "A")
                 ip_results.append({'dnsbl': bl, 'status': 'listed', 'details': str(answers[0])})
             except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
@@ -1684,10 +1851,11 @@ def api_blacklist_check():
     mx_reports = []
     for m_ip in mx_ips:
         if m_ip != ip: # Avoid duplicate work if domain A record points to same IP as MX
+            mx_results = check_ip(m_ip)
             mx_reports.append({
                 'ip': m_ip,
-                'results': check_ip(m_ip),
-                'listed_count': len([r for r in check_ip(m_ip) if r['status'] == 'listed'])
+                'results': mx_results,
+                'listed_count': len([r for r in mx_results if r['status'] == 'listed'])
             })
 
     return jsonify({
@@ -2207,23 +2375,6 @@ def api_widget_detail(w_id):
             return jsonify({'message': 'Updated'})
     finally:
         session_db.close()
-
-def mask_email(email):
-    """Masks an email address for privacy (e.g. d***l@e***.com)."""
-    if not email or '@' not in email:
-        return email
-    try:
-        user, domain = email.split('@')
-        m_user = user[0] + '***' + user[-1] if len(user) > 2 else user[0] + '***'
-        
-        domain_parts = domain.split('.')
-        m_domain = domain_parts[0][0] + '***'
-        if len(domain_parts) > 1:
-            m_domain += '.' + domain_parts[-1]
-            
-        return f"{m_user}@{m_domain}"
-    except (IndexError, ValueError):
-        return email
 
 @app.route('/api/stats/overview')
 def api_stats_overview():

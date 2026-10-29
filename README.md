@@ -20,6 +20,10 @@ MailDT intentionally fails closed:
 - state-changing administrator operations require a session-bound CSRF token
 - SMTP diagnostics require authentication, an exact host/port allowlist, and a public DNS result; IP literals, loopback, private, link-local, multicast, unspecified, reserved, and mixed public/private answers are rejected
 - the validated SMTP IP is dialed directly, preventing a second DNS lookup from rebinding the connection
+- every credential-bearing SMTP/IMAP connection (probes, inbox polling, alert mail, diagnostics) verifies the server certificate chain and hostname over TLS 1.2+; mail servers signed by a private CA need `MAIL_TLS_CA_FILE`
+- returned probes are accepted only with a private receipt token carried in the outbound probe; the probe GUID shown on the dashboard is not sufficient to fake a delivery
+- inbox polling isolates each message: malformed, forged, unknown, or duplicate messages are logged and removed instead of blocking later polls, database errors are rolled back per message, and received subjects are escaped before logging
+- the public decoder caps input at 256 KiB and 100 `Received` hops, runs under a memory limit, and reads at most 4 MiB of report output; the public blacklist check queries at most three MX addresses within a 25-second budget
 - decoder HTTP requests require HTTPS, do not follow redirects, have connect/read deadlines, and reject responses above 512 KiB; anonymous decoder runs perform no DNS or IP-geolocation lookups, and decoder errors are logged server-side instead of returned
 - the Content-Security-Policy allows only same-origin scripts and inline scripts carrying a per-request nonce; untrusted values (mail headers, decoder output, remote SMTP replies) are HTML-escaped before rendering
 - Pin links must be absolute `http(s)` URLs, and Pin icons must be PNG, JPEG, GIF, WebP, or ICO files (max 512 KB, detected by content); icons are served with a fixed image type and a sandboxing CSP
@@ -112,6 +116,7 @@ The full non-secret template is [.env.example](.env.example). Important settings
 | `SMTP_DIAGNOSTIC_ALLOWED_PORTS` | Interactive diagnostic port allowlist |
 | `SEND_INTERVAL` | Probe-send interval in seconds |
 | `CHECK_INTERVAL` | IMAP polling interval in seconds |
+| `MAIL_TLS_CA_FILE` | Optional PEM CA bundle (path inside the container) for SMTP/IMAP servers with a private CA; verification stays on |
 | `ALERT_THRESHOLD` | Delay threshold in seconds |
 
 The Compose stack mounts `DB_PASS_FILE`, `SECRET_KEY_FILE`, `ADMIN_PASSWORD_FILE`, `ADMIN_TOTP_SECRET_FILE`, `SMTP_PASS_FILE`, and `IMAP_PASS_FILE` inside the containers. Direct environment variables remain supported for non-Compose deployments, but setting both forms for one secret is rejected.

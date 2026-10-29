@@ -202,7 +202,7 @@ def test_decoder_failure_hides_stderr_and_anonymous_runs_without_resolution(clie
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 1, stdout='', stderr='Traceback: /srv/app/secret_path.py')
 
-    monkeypatch.setattr(maildt.subprocess, 'run', fake_run)
+    monkeypatch.setattr(maildt, 'run_decoder', fake_run)
     response = client.post('/api/decode-spam', base_url=BASE, json={'headers': 'X-Test: 1'})
     assert response.status_code == 500
     assert b'secret_path' not in response.data
