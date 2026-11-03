@@ -5,10 +5,10 @@ APScheduler==3.11.3
 requests==2.34.2
 python-dotenv==1.2.4
 pyotp==2.10.0
-dnspython==2.9.0
+dnspython==2.9.1
 python-dateutil==3.0.0
 tldextract==5.4.0
-filelock==4.2.4
+filelock==4.2.5
 packaging==26.3
 colorama==0.4.6
 gunicorn==26.2.0
