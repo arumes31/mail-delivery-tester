@@ -123,7 +123,7 @@ The Compose stack mounts `DB_PASS_FILE`, `SECRET_KEY_FILE`, `ADMIN_PASSWORD_FILE
 
 ## Development and verification
 
-Python 3.14 is the supported runtime. Dependencies are exact and hash-locked.
+Python 3.15 (with Python 3.14 support) is the supported runtime. Dependencies are exact and hash-locked.
 
 ```bash
 uv venv
@@ -137,8 +137,8 @@ uv pip install --python .venv/bin/python --require-hashes -r requirements-dev.tx
 Refresh locks only after reviewing upstream changes:
 
 ```bash
-uv pip compile requirements.in --python-version 3.14 --generate-hashes --output-file requirements.txt
-uv pip compile requirements-dev.in --python-version 3.14 --generate-hashes --output-file requirements-dev.txt
+uv pip compile requirements.in --python-version 3.15 --generate-hashes --output-file requirements.txt
+uv pip compile requirements-dev.in --python-version 3.15 --generate-hashes --output-file requirements-dev.txt
 ```
 
 `decode_spam_headers_official.py` is a vendored upstream decoder and is excluded from the first-party Ruff baseline. Local security fixes are intentionally narrow: duplicate-key removal and bounded HTTPS fetching. Keep its upstream source/version documented when replacing it, and rerun decoder fixtures plus the full security suite.

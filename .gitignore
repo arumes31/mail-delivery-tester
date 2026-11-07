@@ -16,3 +16,5 @@ graphify-out/
 .pytest-tmp/
 tests/*.sqlite3
 secrets/
+.claudeignore
+docs/
