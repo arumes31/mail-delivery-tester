@@ -1,5 +1,8 @@
 # Dependency assessment — 2026-10-03
 
+> [!NOTE]
+> Audit baseline updated 2026-11-07: `requirements.txt` locks `idna==3.19`, which satisfies the `>=3.15` floor and safely remediates GHSA-65pc-fj4g-8rjx / CVE-2026-45409.
+
 ## Scope and baseline
 
 Repository: `arumes31/mail-delivery-tester`. The remote default branch was verified
