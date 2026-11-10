@@ -436,8 +436,8 @@ def test_blacklist_bounds_mx_work_and_checks_each_address_once(client, monkeypat
 
     def fake_gethostbyname(host):
         if host == 'example.com':
-            return '192.0.2.1'
-        return f'198.51.100.{int(host[2:host.index(".")]) + 1}'
+            return '8.8.8.8'
+        return f'1.1.1.{int(host[2:host.index(".")]) + 1}'
 
     monkeypatch.setattr(maildt.dns.resolver, 'Resolver', FakeResolver)
     monkeypatch.setattr(maildt.socket, 'gethostbyname', fake_gethostbyname)
@@ -462,6 +462,68 @@ def test_blacklist_stops_querying_after_deadline(client, monkeypatch):
 
     monkeypatch.setattr(maildt.dns.resolver, 'Resolver', FakeResolver)
     monkeypatch.setattr(maildt, 'BLACKLIST_DEADLINE', -1)
-    data = client.get('/api/diagnostics/blacklist?target=192.0.2.1', base_url=BASE).get_json()
+    data = client.get('/api/diagnostics/blacklist?target=8.8.8.8', base_url=BASE).get_json()
     assert queries == []
     assert all(r['details'].startswith('Skipped') for r in data['results'])
+
+
+@pytest.mark.parametrize('target', ['127.0.0.1', '10.0.0.5', '172.18.0.3', '192.168.1.1', '999.1.1.1'])
+def test_blacklist_rejects_non_public_ip_literals(client, monkeypatch, target):
+    queries = []
+
+    class FakeResolver:
+        def __init__(self):
+            self.nameservers = []
+
+        def resolve(self, name, rtype):
+            queries.append(name)
+            raise dns.resolver.NXDOMAIN()
+
+    monkeypatch.setattr(maildt.dns.resolver, 'Resolver', FakeResolver)
+    response = client.get(f'/api/diagnostics/blacklist?target={target}', base_url=BASE)
+    assert response.status_code == 400
+    assert 'resolved_ip' not in response.get_json()
+    assert queries == []
+
+
+def test_blacklist_does_not_resolve_internal_names_for_anonymous_callers(client, monkeypatch):
+    queries = []
+
+    class FakeResolver:
+        def __init__(self):
+            self.nameservers = []
+
+        def resolve(self, name, rtype):
+            queries.append(name)
+            raise dns.resolver.NoAnswer()
+
+    # 'scheduler' is the Compose service name on the shared backend network
+    monkeypatch.setattr(maildt.dns.resolver, 'Resolver', FakeResolver)
+    monkeypatch.setattr(maildt.socket, 'gethostbyname', lambda host: '172.18.0.4')
+    response = client.get('/api/diagnostics/blacklist?target=scheduler', base_url=BASE)
+    data = response.get_json()
+    assert response.status_code == 400
+    assert '172.18.0.4' not in json.dumps(data)
+    assert not [q for q in queries if q.startswith('4.0.18.172.')]
+
+
+def test_blacklist_skips_private_mx_addresses(client, monkeypatch):
+    queries = []
+
+    class FakeResolver:
+        def __init__(self):
+            self.nameservers = []
+            self.timeout = self.lifetime = None
+
+        def resolve(self, name, rtype):
+            if rtype == 'MX':
+                return [FakeAnswer('internal.example.com.', 1), FakeAnswer('mx.example.com.', 2)]
+            queries.append(name)
+            raise dns.resolver.NXDOMAIN()
+
+    addresses = {'example.com': '8.8.8.8', 'internal.example.com': '10.1.2.3', 'mx.example.com': '1.1.1.1'}
+    monkeypatch.setattr(maildt.dns.resolver, 'Resolver', FakeResolver)
+    monkeypatch.setattr(maildt.socket, 'gethostbyname', addresses.__getitem__)
+    data = client.get('/api/diagnostics/blacklist?target=example.com', base_url=BASE).get_json()
+    assert [report['ip'] for report in data['mx_reports']] == ['1.1.1.1']
+    assert not [q for q in queries if q.startswith('3.2.1.10.')]
