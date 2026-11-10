@@ -13,12 +13,20 @@ updates:
           - "github/codeql-action/*"
 
   # Maintain dependencies for pip (requirements.txt)
+  # Weekly and grouped: each pip PR triggers the full CI/CodeQL/container
+  # suite, and daily single-package PRs multiplied those runs. Security
+  # updates are not affected by this schedule.
   - package-ecosystem: "pip"
     directory: "/"
     target-branch: "main"
     schedule:
-      interval: "daily"
+      interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   # Maintain dependencies for Docker
   - package-ecosystem: "docker"
