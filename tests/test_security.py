@@ -9,6 +9,7 @@ from security import (
     parse_allowed_hosts,
     parse_allowed_ports,
     parse_cidrs,
+    public_ipv4,
     read_secret,
     resolve_smtp_destination,
     safe_local_redirect,
@@ -227,3 +228,23 @@ def test_trusted_proxy_middleware_accepts_headers_from_allowlisted_peer():
     }
     middleware(environ, lambda status, headers: None)
     assert captured == [("198.51.100.8", "https")]
+
+
+@pytest.mark.parametrize('address, expected', [
+    ('8.8.8.8', '8.8.8.8'),
+    (' 1.1.1.1 ', '1.1.1.1'),
+    ('127.0.0.1', None),
+    ('10.0.0.1', None),
+    ('172.18.0.3', None),
+    ('192.168.0.1', None),
+    ('169.254.1.1', None),
+    ('100.64.0.1', None),
+    ('192.0.2.1', None),
+    ('0.0.0.0', None),
+    ('::1', None),
+    ('not-an-ip', None),
+    ('', None),
+    (None, None),
+])
+def test_public_ipv4(address, expected):
+    assert public_ipv4(address) == expected
