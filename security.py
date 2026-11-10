@@ -231,6 +231,19 @@ def resolve_smtp_destination(
     return public_addresses[0], port
 
 
+def public_ipv4(address: str | None) -> str | None:
+    """Return the canonical IPv4 address if it is globally routable, otherwise None.
+
+    Used before an address learned from caller input is queried against third parties
+    or echoed back, so internal (container, LAN, loopback) addresses are never exposed.
+    """
+    try:
+        parsed = ipaddress.IPv4Address((address or "").strip())
+    except ValueError:
+        return None
+    return str(parsed) if parsed.is_global else None
+
+
 # Raster formats accepted for widget icons, keyed by served extension.
 WIDGET_ICON_TYPES = {
     "png": "image/png",

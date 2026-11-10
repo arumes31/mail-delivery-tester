@@ -52,6 +52,7 @@ from security import (
     parse_allowed_ports,
     parse_cidrs,
     probe_receipt_token,
+    public_ipv4,
     read_optional_secret,
     read_secret,
     resolve_smtp_destination,
@@ -1780,8 +1781,9 @@ def api_blacklist_check():
                         break
                     mx_host = str(mx.exchange).rstrip('.')
                     try:
-                        mx_ip = socket.gethostbyname(mx_host)
-                        if mx_ip not in mx_ips: mx_ips.append(mx_ip)
+                        # Only public addresses are checked: never reveal or forward internal ones.
+                        mx_ip = public_ipv4(socket.gethostbyname(mx_host))
+                        if mx_ip and mx_ip not in mx_ips: mx_ips.append(mx_ip)
                     except socket.gaierror as error:
                         logger.debug("MX hostname lookup failed: %s", error)
             except dns.exception.DNSException as error:
@@ -1800,6 +1802,14 @@ def api_blacklist_check():
                 else: raise Exception("No A record")
             except Exception:
                 return jsonify({'error': 'Could not resolve hostname'}), 400
+
+    # The checker is public: refuse IP literals and names that resolve to non-public
+    # addresses (container service names, LAN hosts, loopback), so it cannot be used to
+    # map internal hosts or leak their addresses to the third-party DNSBLs.
+    public_ip = public_ipv4(ip)
+    if not public_ip:
+        return jsonify({'error': 'Target must be or resolve to a public IPv4 address'}), 400
+    ip = public_ip
 
     dnsbls = [
         "zen.spamhaus.org",
