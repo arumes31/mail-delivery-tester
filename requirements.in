@@ -11,6 +11,6 @@ tldextract==5.4.0
 filelock==4.2.9
 packaging==26.3
 colorama==0.4.6
-gunicorn==26.2.0
+gunicorn==27.0.1
 urllib3==2.8.0
 Werkzeug==3.1.9
